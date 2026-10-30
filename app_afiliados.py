@@ -30,8 +30,8 @@ st.write(df.columns.tolist())
 # ⚠️ CONFIGURACIÓN DE COLUMNAS 
 # ==========================================
 # Modifica estas dos variables escribiendo los nombres exactos de la lista superior:
-COLUMNA_FECHA = 'Fecha'   
-COLUMNA_ESTADO = 'ESTADO' 
+COLUMNA_FECHA = 'creation_date'   # Columna exacta de fecha de venta  
+COLUMNA_ESTADO = 'estado'         # Columna exacta para los estados (Lead Efectivo, Rechazada, etc.)
 
 if COLUMNA_FECHA not in df.columns or COLUMNA_ESTADO not in df.columns:
     st.warning(f"🚨 Actualiza los valores de COLUMNA_FECHA y COLUMNA_ESTADO (Líneas 30 y 31 del código) usando los nombres mostrados en el recuadro azul.")
