@@ -9,7 +9,7 @@ import calendar
 # ⚙️ CONFIGURACIÓN DE HOJAS Y COLUMNAS
 # ==========================================
 # Nombre de tu archivo en GitHub
-ARCHIVO_DATOS = "Amex_Afiliados.parquet.xlsx" 
+ARCHIVO_DATOS = "Amex_Afiliados.parquetxlsx" 
 
 # 1. HOJA DE VENTAS
 HOJA_VENTAS = "Ventas"
