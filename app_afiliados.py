@@ -1,171 +1,175 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import numpy as np
 import holidays
-import datetime
+from datetime import date, timedelta
 import calendar
 
-st.set_page_config(page_title="Dashboard Afiliados Amex", page_icon="💳", layout="wide")
+# ==========================================
+# CONFIGURACIÓN DE COLUMNAS (Ajusta esto según tu parquet)
+# ==========================================
+ARCHIVO_DATOS = "Amex_Afiliados.parquet"
+COL_FECHA = "fecha" # Columna de fecha de venta/gestión
+COL_ESTADO = "status" # Columna donde dice 'LEAD EFECTIVO', 'RECHAZADA', etc.
+COL_AGENTES = "user" # Columna del ID o Nombre del agente para contar 'Agentes Log'
 
+# Textos exactos de tus tipificaciones en la base de datos
+ESTADO_LE = "LEAD EFECTIVO"
+ESTADO_LNC = "LEAD NO CAPTURADO"
+ESTADO_LNC_COND = "LEAD NO CONDICIONES"
+ESTADO_DECLINADO = "DECLINADO"
+ESTADO_CANCELADO = "CANCELADO"
+ESTADO_APROBADO = "APROBADO" # Ajusta según cómo se llame el Aprobado (AP)
 # ==========================================
-# 1. CARGA DE DATOS Y DIAGNÓSTICO
-# ==========================================
+
+# Configuración de página amplia para vista gerencial
+st.set_page_config(page_title="Dashboard Amex Afiliados", layout="wide", initial_sidebar_state="expanded")
+
+# --- CARGA DE DATOS ---
 @st.cache_data
 def cargar_datos():
-    return pd.read_parquet("Amex_Afiliados.parquet")
+    try:
+        df = pd.read_parquet(ARCHIVO_DATOS)
+        df[COL_FECHA] = pd.to_datetime(df[COL_FECHA]).dt.date
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar el archivo Parquet: {e}")
+        return pd.DataFrame()
 
-try:
-    df = cargar_datos()
-except Exception as e:
-    st.error(f"Error de sistema al leer el archivo: {e}")
-    st.stop()
+df_raw = cargar_datos()
 
-st.title("📊 Dashboard General - Amex")
-
-# Panel de Diagnóstico para ver las columnas reales
-st.info("✅ El archivo Parquet se leyó exitosamente. Revisa esta lista para conocer los nombres exactos de tus columnas:")
-st.write(df.columns.tolist())
-
-# ==========================================
-# ⚠️ CONFIGURACIÓN DE COLUMNAS 
-# ==========================================
-# Modifica estas dos variables escribiendo los nombres exactos de la lista superior:
-COLUMNA_FECHA = 'creation_date'   # Columna exacta de fecha de venta  
-COLUMNA_ESTADO = 'estado'         # Columna exacta para los estados (Lead Efectivo, Rechazada, etc.)
-
-if COLUMNA_FECHA not in df.columns or COLUMNA_ESTADO not in df.columns:
-    st.warning(f"🚨 Actualiza los valores de COLUMNA_FECHA y COLUMNA_ESTADO (Líneas 30 y 31 del código) usando los nombres mostrados en el recuadro azul.")
-    st.stop()
-
-# Normalizar fecha internamente para evitar errores posteriores
-df['Fecha_Normalizada'] = pd.to_datetime(df[COLUMNA_FECHA]).dt.date
-
-# ==========================================
-# 2. FILTROS Y LÓGICA DE CALENDARIO
-# ==========================================
-tab1, tab2 = st.tabs(["📅 General por mes y día", "⚙️ Otras Vistas"])
-
-with tab1:
-    st.subheader("Filtros de Tiempo")
+if not df_raw.empty:
+    # --- FILTROS LATERALES ---
+    st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
+    st.sidebar.header("Filtros Gerenciales")
     
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        years_disp = [2024, 2025, 2026, 2027]
-        year_sel = st.selectbox("Seleccione el Año", years_disp, index=years_disp.index(2026) if 2026 in years_disp else 0)
-    with col_f2:
-        meses_dict = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 
-                      7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-        mes_sel_nombre = st.selectbox("Seleccione el Mes", list(meses_dict.values()), index=9)
-        mes_sel_num = [k for k, v in meses_dict.items() if v == mes_sel_nombre][0]
+    # Extraer años y meses disponibles
+    años_disp = sorted(df_raw[COL_FECHA].apply(lambda x: x.year).unique())
+    año_sel = st.sidebar.selectbox("Seleccione el Año", años_disp, index=len(años_disp)-1)
+    
+    meses_disp = sorted(df_raw[df_raw[COL_FECHA].apply(lambda x: x.year) == año_sel][COL_FECHA].apply(lambda x: x.month).unique())
+    nombres_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+    mes_formateado = [nombres_meses[m] for m in meses_disp]
+    
+    mes_sel_nombre = st.sidebar.selectbox("Seleccione el Mes", mes_formateado, index=len(mes_formateado)-1)
+    mes_sel = list(nombres_meses.keys())[list(nombres_meses.values()).index(mes_sel_nombre)]
 
-    festivos_mx = holidays.Mexico(years=year_sel)
-    num_dias_mes = calendar.monthrange(year_sel, mes_sel_num)[1]
-    
-    dias_habiles_lista = []
-    for d in range(1, num_dias_mes + 1):
-        fecha_act = datetime.date(year_sel, mes_sel_num, d)
-        if fecha_act.weekday() != 6 and fecha_act not in festivos_mx:
-            dias_habiles_lista.append(fecha_act)
-            
-    dias_habiles_totales = len(dias_habiles_lista)
-    
-    hoy = datetime.date.today()
-    dias_transcurridos = [d for d in dias_habiles_lista if d <= hoy]
-    total_transcurridos = len(dias_transcurridos) if hoy.month == mes_sel_num and hoy.year == year_sel else (dias_habiles_totales if hoy > datetime.date(year_sel, mes_sel_num, num_dias_mes) else 0)
+    # Meta diaria estática (puedes volverlo dinámico luego)
+    meta_diaria = st.sidebar.number_input("Meta Diaria (Tramites)", min_value=0, value=279)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Días Hábiles del Mes", dias_habiles_totales)
-    c2.metric("Días Transcurridos", total_transcurridos)
+    # --- LÓGICA DE CALENDARIO Y DÍAS HÁBILES (Sin Domingos, Sin Festivos MX) ---
+    festivos_mx = holidays.Mexico(years=año_sel)
     
-    st.divider()
+    num_dias = calendar.monthrange(año_sel, mes_sel)[1]
+    fechas_mes = [date(año_sel, mes_sel, d) for d in range(1, num_dias + 1)]
+    
+    df_calendario = pd.DataFrame({"Fecha": fechas_mes})
+    df_calendario['Día_Semana'] = pd.to_datetime(df_calendario['Fecha']).dt.dayofweek
+    df_calendario['Festivo'] = df_calendario['Fecha'].apply(lambda x: x in festivos_mx)
+    
+    # Es hábil si NO es domingo (6) y NO es festivo
+    df_calendario['Es_Habil'] = ~((df_calendario['Día_Semana'] == 6) | (df_calendario['Festivo']))
+    dias_habiles_totales = df_calendario['Es_Habil'].sum()
+    
+    # --- PROCESAMIENTO DE DATOS ---
+    df_mes = df_raw[(df_raw[COL_FECHA].apply(lambda x: x.year) == año_sel) & (df_raw[COL_FECHA].apply(lambda x: x.month) == mes_sel)]
+    
+    # Agrupación diaria simulando los CONTAR.SI.CONJUNTO
+    agrupado = df_mes.groupby(COL_FECHA).apply(lambda x: pd.Series({
+        'Tramites': len(x),
+        'Lead Efectivo': (x[COL_ESTADO] == ESTADO_LE).sum(),
+        'Lead No Capturado': (x[COL_ESTADO] == ESTADO_LNC).sum(),
+        'Lead No Condiciones': (x[COL_ESTADO] == ESTADO_LNC_COND).sum(),
+        'Declinado': (x[COL_ESTADO] == ESTADO_DECLINADO).sum(),
+        'Cancelado': (x[COL_ESTADO] == ESTADO_CANCELADO).sum(),
+        'AP': (x[COL_ESTADO] == ESTADO_APROBADO).sum(),
+        'Agentes Log': x[COL_AGENTES].nunique() # Cuenta agentes únicos en el día
+    })).reset_index()
+    
+    # Unir calendario con datos
+    df_final = pd.merge(df_calendario, agrupado, left_on="Fecha", right_on=COL_FECHA, how="left").fillna(0)
+    
+    # Nombre del día en español (ej. lun-02-nov)
+    dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb", 6:"dom"}
+    df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[row['Día_Semana']]}-{row['Fecha'].strftime('%d-%b')}", axis=1)
+    
+    # --- CÁLCULO DE COLUMNAS FORMULADAS ---
+    df_final['Otros'] = df_final['Tramites'] - (df_final['Lead Efectivo'] + df_final['Lead No Capturado'] + df_final['Lead No Condiciones'])
+    df_final['% LE'] = np.where(df_final['Tramites'] > 0, df_final['Lead Efectivo'] / df_final['Tramites'], 0)
+    
+    # Asumiendo % REM/RECH como Otros / Tramites (Ajustar según necesidad)
+    df_final['% REM/RECH'] = np.where(df_final['Tramites'] > 0, df_final['Otros'] / df_final['Tramites'], 0)
+    df_final['Prom'] = np.where(df_final['Agentes Log'] > 0, df_final['Tramites'] / df_final['Agentes Log'], 0)
+    
+    # Simulación de Agentes Plantilla y Ausentismo (puedes conectarlo a otra BD luego)
+    df_final['Agentes Plantilla'] = df_final['Agentes Log'] + np.random.randint(0, 3, size=len(df_final)) # Placeholder
+    df_final['% Ausentismo'] = np.where(df_final['Agentes Plantilla'] > 0, (df_final['Agentes Plantilla'] - df_final['Agentes Log']) / df_final['Agentes Plantilla'], 0)
+    
+    df_final['Meta Día'] = np.where(df_final['Es_Habil'], meta_diaria, 0)
+    df_final['GAP'] = df_final['Tramites'] - df_final['Meta Día']
+    
+    df_final['% Declinado'] = np.where(df_final['Tramites'] > 0, df_final['Declinado'] / df_final['Tramites'], 0)
+    df_final['% Cancelado'] = np.where(df_final['Tramites'] > 0, df_final['Cancelado'] / df_final['Tramites'], 0)
 
-    # ==========================================
-    # 3. TABLA Y MÉTRICAS
-    # ==========================================
-    df_mes = df[(pd.to_datetime(df['Fecha_Normalizada']).dt.year == year_sel) & (pd.to_datetime(df['Fecha_Normalizada']).dt.month == mes_sel_num)]
-    
-    if not df_mes.empty:
-        resumen_diario = df_mes.groupby('Fecha_Normalizada').apply(lambda x: pd.Series({
-            'Tramites': len(x),
-            'Lead Efectivo': (x[COLUMNA_ESTADO] == 'LEAD EFECTIVO').sum(),
-            'Lead No Capturado': (x[COLUMNA_ESTADO] == 'LEAD NO CAPTURADO').sum(),
-            'Lead No Condiciones': (x[COLUMNA_ESTADO] == 'LEAD NO CONDICIONES').sum(),
-            'Otros': (x[COLUMNA_ESTADO] == 'RECHAZADA').sum() + (x[COLUMNA_ESTADO] == 'REMEDIACIÓN').sum(),
-            'AP': (x[COLUMNA_ESTADO] == 'A').sum(),
-            'Declinado': (x[COLUMNA_ESTADO] == 'D').sum(),
-            'Cancelado': (x[COLUMNA_ESTADO] == 'C').sum(),
-            'Pendiente': (x[COLUMNA_ESTADO] == 'p').sum()
-        })).reset_index()
-    else:
-        resumen_diario = pd.DataFrame(columns=['Fecha_Normalizada', 'Tramites', 'Lead Efectivo', 'Lead No Capturado', 
-                                               'Lead No Condiciones', 'Otros', 'AP', 'Declinado', 'Cancelado', 'Pendiente'])
-
-    fechas_del_mes = pd.DataFrame({'Fecha_Normalizada': [datetime.date(year_sel, mes_sel_num, d) for d in range(1, num_dias_mes + 1)]})
-    resumen_diario = pd.merge(fechas_del_mes, resumen_diario, on='Fecha_Normalizada', how='left').fillna(0)
-    
-    dias_es = {0: 'lun', 1: 'mar', 2: 'mié', 3: 'jue', 4: 'vie', 5: 'sáb', 6: 'dom'}
-    meses_ab = {10: 'oct', 11: 'nov', 12: 'dic', 1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep'}
-    resumen_diario['Día'] = resumen_diario['Fecha_Normalizada'].apply(lambda x: f"{dias_es[x.weekday()]}-{x.day:02d}-{meses_ab[x.month]}")
-
-    resumen_diario['% LE'] = (resumen_diario['Lead Efectivo'] / resumen_diario['Tramites']).fillna(0)
-    resumen_diario['% REM/RECH'] = (resumen_diario['Otros'] / resumen_diario['Tramites']).fillna(0)
-    
-    resumen_diario['Agentes Log'] = 60 
-    resumen_diario['Agentes Plantilla'] = 61
-    resumen_diario['Prom'] = (resumen_diario['Lead Efectivo'] / resumen_diario['Agentes Log']).fillna(0)
-    resumen_diario['% Ausentimo'] = (resumen_diario['Agentes Plantilla'] / resumen_diario['Agentes Log'] - 1).fillna(0)
-    resumen_diario['SPH'] = 0.70 
-    
-    resumen_diario['AP DIA'] = (resumen_diario['AP'] / resumen_diario['Lead Efectivo']).fillna(0)
-    resumen_diario['AP Acum'] = resumen_diario['AP DIA'] 
-    
-    resumen_diario['Meta Día'] = 300 
-    resumen_diario['Lead_Efectivo_Acum'] = resumen_diario['Lead Efectivo'].cumsum()
-    resumen_diario['Meta_Acum'] = resumen_diario['Meta Día'].cumsum()
-    
-    resumen_diario['GAP'] = resumen_diario.apply(lambda x: 0 if x['Lead Efectivo'] == 0 else x['Lead_Efectivo_Acum'] - x['Meta_Acum'], axis=1)
-    
-    resumen_diario['% EVALUADO'] = 0.20 
-    resumen_diario['NO GESTIONADO'] = 0 
-    
-    resumen_diario['% Declinado'] = (resumen_diario['Declinado'] / resumen_diario['Lead Efectivo']).fillna(0)
-    resumen_diario['% Cancelado'] = (resumen_diario['Cancelado'] / resumen_diario['Lead Efectivo']).fillna(0)
-    resumen_diario['% Pendiente'] = (resumen_diario['Pendiente'] / resumen_diario['Lead Efectivo']).fillna(0)
-
-    columnas_finales = [
-        'Fecha_Normalizada', 'Día', 'Tramites', 'Lead Efectivo', 'Lead No Capturado', 'Lead No Condiciones', 'Otros', 
-        '% LE', '% REM/RECH', 'Prom', 'Agentes Log', 'Agentes Plantilla', '% Ausentimo', 'SPH', 
-        'AP', 'AP DIA', 'AP Acum', 'Meta Día', 'GAP', '% EVALUADO', 'NO GESTIONADO', 
-        'Declinado', '% Declinado', 'Cancelado', '% Cancelado', 'Pendiente', '% Pendiente'
+    # Ordenar columnas para la vista gerencial
+    cols_vista = [
+        'Día', 'Tramites', 'Lead Efectivo', 'Lead No Capturado', 'Lead No Condiciones', 'Otros', 
+        '% LE', '% REM/RECH', 'Prom', 'Agentes Log', 'Agentes Plantilla', '% Ausentismo', 
+        'AP', 'Meta Día', 'GAP', 'Declinado', '% Declinado', 'Cancelado', '% Cancelado'
     ]
-    
-    df_tabla = resumen_diario[columnas_finales].copy()
-    st.subheader("📋 Resumen Diario Operativo")
-    
-    styler = df_tabla.style.format({
-        '% LE': '{:.0%}', '% REM/RECH': '{:.0%}', 'Prom': '{:.1f}', '% Ausentimo': '{:.0%}',
-        'SPH': '{:.2f}', 'AP DIA': '{:.1%}', 'AP Acum': '{:.1%}', '% EVALUADO': '{:.0%}',
-        '% Declinado': '{:.1%}', '% Cancelado': '{:.1%}', '% Pendiente': '{:.1%}'
-    })
-    styler = styler.set_properties(subset=['Tramites', 'Lead Efectivo'], **{'background-color': '#e2efda', 'color': 'black'})
-    
-    st.dataframe(styler, use_container_width=True, hide_index=True)
-    st.divider()
+    df_vista = df_final[cols_vista].copy()
 
-    # ==========================================
-    # 4. GRÁFICA
-    # ==========================================
-    st.subheader("📉 Seguimiento LE Real Vs Pto Diario")
+    # --- INTERFAZ DEL DASHBOARD ---
+    st.title("📊 Informe Gerencial - Amex Afiliados")
     
-    df_grafica = resumen_diario[resumen_diario['Tramites'] > 0]
+    # Pestañas
+    tab_gerencial, tab_detalles = st.tabs(["📑 Resumen Mensual", "🔍 Base de Datos"])
     
-    if not df_grafica.empty:
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=df_grafica['Día'], y=df_grafica['Meta Día'], name='LEADS EFECTIVOS PTTO', marker_color='#ed7d31', text=df_grafica['Meta Día'], textposition='auto'))
-        fig.add_trace(go.Bar(x=df_grafica['Día'], y=df_grafica['Lead Efectivo'], name='LEADS EFECTIVOS REAL', marker_color='#203864', text=df_grafica['Lead Efectivo'], textposition='auto'))
-        fig.add_trace(go.Bar(x=df_grafica['Día'], y=df_grafica['GAP'], name='DIFERENCIA NETA ACUMULADA', marker_color='#385723', text=df_grafica['GAP'], textposition='auto'))
+    with tab_gerencial:
+        # Tarjetas Superiores (KPIs)
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        total_tramites = df_vista['Tramites'].sum()
+        total_le = df_vista['Lead Efectivo'].sum()
+        gap_total = df_vista['GAP'].sum()
+        
+        kpi1.metric("Días Hábiles Mes", f"{dias_habiles_totales} días")
+        kpi2.metric("Trámites Totales", f"{int(total_tramites)}")
+        kpi3.metric("Leads Efectivos", f"{int(total_le)}", f"{(total_le/total_tramites)*100 if total_tramites else 0:.1f}% LE")
+        kpi4.metric("GAP Acumulado", f"{int(gap_total)}", "Por debajo de meta" if gap_total < 0 else "Por encima de meta", delta_color="normal")
 
-        fig.update_layout(barmode='group', height=500, legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="left", x=0), margin=dict(t=30, b=0, l=0, r=0))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No hay datos suficientes para mostrar la gráfica en este mes.")
+        st.markdown("---")
+        
+        # Estilos Condicionales para la Tabla (El toque "Bonito y Gerencial")
+        def color_gap(val):
+            color = '#ffcccc' if val < 0 else '#ccffcc'
+            return f'background-color: {color}'
+            
+        def color_porcentaje(val):
+            if val >= 0.90: return 'background-color: #c6e0b4' # Verde
+            elif val >= 0.80: return 'background-color: #ffe699' # Amarillo
+            elif val > 0: return 'background-color: #ffc000' # Naranja
+            return ''
+
+        # Aplicar estilos con Pandas Styler
+        styler = df_vista.style.format({
+            'Tramites': '{:.0f}', 'Lead Efectivo': '{:.0f}', 'Lead No Capturado': '{:.0f}',
+            'Lead No Condiciones': '{:.0f}', 'Otros': '{:.0f}', 'Agentes Log': '{:.0f}', 
+            'Agentes Plantilla': '{:.0f}', 'AP': '{:.0f}', 'Meta Día': '{:.0f}', 'GAP': '{:.0f}',
+            'Declinado': '{:.0f}', 'Cancelado': '{:.0f}',
+            '% LE': '{:.1%}', '% REM/RECH': '{:.1%}', 'Prom': '{:.1f}', 
+            '% Ausentismo': '{:.1%}', '% Declinado': '{:.1%}', '% Cancelado': '{:.1%}'
+        })\
+        .applymap(color_gap, subset=['GAP'])\
+        .applymap(color_porcentaje, subset=['% LE'])\
+        .background_gradient(cmap='Blues', subset=['Tramites'])\
+        .set_properties(**{'text-align': 'center', 'font-size': '13px'})
+        
+        # Mostrar tabla expandida
+        st.dataframe(styler, use_container_width=True, height=600, hide_index=True)
+
+    with tab_detalles:
+        st.subheader("Datos crudos del mes")
+        st.dataframe(df_mes, use_container_width=True)
+
+else:
+    st.warning("No se encontraron datos en el archivo Parquet. Verifique la ruta o el archivo.")
