@@ -14,11 +14,11 @@ ARCHIVO_DATOS = "Amex_Afiliados.parquet"
 
 # NOMBRES DE TUS COLUMNAS EN EL PARQUET
 C_FECHA_VTA = "fecha_vta"              # Columna E de Ventas
-C_ESTADO = "estado"                    # Columna H de Ventas (LEAD EFECTIVO, etc)
-C_DECISION = "estado_decision"         # Columna AT (A, D, C, P, -)
+C_ESTADO = "status_vta"                    # Columna H de Ventas (LEAD EFECTIVO, etc)
+C_DECISION = "Decisión"                # Columna AT (A, D, C, P, -)
 C_FECHA_DECISION = "fecha_decision"    # Fecha en la que se tomó la decisión
 C_ASESOR = "asesor"                    # Nombre o ID del asesor
-C_TIEMPO_REAL = "tiempo_real"          # Tiempo real de la hoja Malla Día
+C_TIEMPO_REAL = "Tiempo Real"          # Tiempo real de la hoja Malla Día
 C_PLANTILLA = "agentes_plantilla"      # Agentes programados
 C_LOG = "agentes_log"                  # Agentes que asistieron
 C_META_ASESOR = "meta_asesor"          # Meta diaria por asesor (hoja Seg PPTO)
