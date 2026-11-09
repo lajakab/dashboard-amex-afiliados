@@ -10,15 +10,30 @@ import calendar
 # ==========================================
 ARCHIVO_DATOS = "Amex_Afiliados.parquet"
 
+C_FECHA_VTA = "fecha_vta"
+C_ESTADO = "estado"
+C_DECISION = "decision"
+C_FECHA_DEC = "fecha_decision"
+C_ASESOR = "asesor"
+
+TXT_LE = "LEAD EFECTIVO"
+TXT_LNC = "LEAD NO CAPTURADO"
+TXT_LNC_COND = "LEAD NO CONDICIONES"
+TXT_REMED = "REMEDIACIÓN"
+# ==========================================
+
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
 @st.cache_data
 def cargar_datos():
     try:
         df = pd.read_parquet(ARCHIVO_DATOS)
-        df['fecha_vta'] = pd.to_datetime(df['fecha_vta'], errors='coerce')
-        if 'fecha_decision' in df.columns:
-            df['fecha_decision'] = pd.to_datetime(df['fecha_decision'], errors='coerce')
+        # Convertimos las columnas a minúsculas para evitar errores de mayúsculas
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        if C_FECHA_VTA in df.columns:
+            df[C_FECHA_VTA] = pd.to_datetime(df[C_FECHA_VTA], errors='coerce').dt.date
+        if C_FECHA_DEC in df.columns:
+            df[C_FECHA_DEC] = pd.to_datetime(df[C_FECHA_DEC], errors='coerce').dt.date
         return df
     except Exception as e:
         st.error(f"❌ Error al leer el archivo Parquet: {e}")
@@ -30,11 +45,11 @@ if not df_raw.empty:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros")
     
-    fechas_validas = df_raw['fecha_vta'].dropna()
-    años_disp = sorted(fechas_validas.dt.year.unique()) if not fechas_validas.empty else [date.today().year]
+    fechas_validas = df_raw[C_FECHA_VTA].dropna() if C_FECHA_VTA in df_raw.columns else pd.Series()
+    años_disp = sorted(fechas_validas.apply(lambda x: x.year).unique()) if not fechas_validas.empty else [date.today().year]
     año_sel = st.sidebar.selectbox("Año", años_disp, index=len(años_disp)-1)
     
-    meses_disp = sorted(fechas_validas[fechas_validas.dt.year == año_sel].dt.month.unique()) if not fechas_validas.empty else [date.today().month]
+    meses_disp = sorted(fechas_validas[fechas_validas.apply(lambda x: x.year) == año_sel].apply(lambda x: x.month).unique()) if not fechas_validas.empty else [date.today().month]
     nombres_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
     mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
     
@@ -45,7 +60,7 @@ if not df_raw.empty:
         mes_sel = date.today().month
         mes_sel_nombre = nombres_meses[mes_sel]
 
-    # --- CALENDARIO VERTICAL (Lunes a Sábado, sin festivos MX) ---
+    # --- CALENDARIO VERTICAL (Lunes a Sábado, sin festivos) ---
     festivos_mx = holidays.Mexico(years=año_sel)
     num_dias = calendar.monthrange(año_sel, mes_sel)[1]
     
@@ -53,68 +68,75 @@ if not df_raw.empty:
     df_cal = pd.DataFrame({"Fecha": fechas_mes})
     df_cal['Día_Semana'] = pd.to_datetime(df_cal['Fecha']).dt.dayofweek
     df_cal['Es_Festivo'] = df_cal['Fecha'].apply(lambda x: x in festivos_mx)
-    df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
+    df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))]
 
-    # --- FILTRAR DATOS Y AGRUPAR ---
-    df_filtro = df_raw[(df_raw['fecha_vta'].dt.year == año_sel) & (df_raw['fecha_vta'].dt.month == mes_sel)].copy()
+    # --- FILTRAR MES Y AÑO ---
+    df_filtro = df_raw[(df_raw[C_FECHA_VTA].apply(lambda x: getattr(x, 'year', 0)) == año_sel) & 
+                       (df_raw[C_FECHA_VTA].apply(lambda x: getattr(x, 'month', 0)) == mes_sel)].copy() if C_FECHA_VTA in df_raw.columns else pd.DataFrame()
 
     if not df_filtro.empty:
-        # Cruce exacto según instrucciones
-        agrupado = df_filtro.groupby(df_filtro['fecha_vta'].dt.date).apply(lambda x: pd.Series({
+        # AGRUPACIÓN TOTALMENTE BLINDADA (Si no existe la columna, no se rompe, pone 0)
+        agrupado = df_filtro.groupby(C_FECHA_VTA).apply(lambda x: pd.Series({
             'Tramites': len(x),
-            'Lead Efectivo': (x['estado'] == 'LEAD EFECTIVO').sum(),
-            'Lead No Capturado': (x['estado'] == 'LEAD NO CAPTURADO').sum(),
-            'Lead No Condiciones': (x['estado'] == 'LEAD NO CONDICIONES').sum(),
-            'Otros': (~x['estado'].isin(['LEAD EFECTIVO', 'LEAD NO CAPTURADO', 'LEAD NO CONDICIONES'])).sum(), # Remedio + Otros
             
-            'EVALUADO': (x['decision'] != '-').sum(),
-            'NO GESTIONADO': (x['decision'] == '-').sum(),
-            'Declinado': (x['decision'] == 'D').sum(),
-            'Cancelado': (x['decision'] == 'C').sum(),
-            'Pendiente': (x['decision'] == 'P').sum(),
+            # Estados
+            'Lead Efectivo': (x[C_ESTADO].astype(str).str.upper().str.strip() == TXT_LE).sum() if C_ESTADO in x.columns else 0,
+            'Lead No Capturado': (x[C_ESTADO].astype(str).str.upper().str.strip() == TXT_LNC).sum() if C_ESTADO in x.columns else 0,
+            'Lead No Condiciones': (x[C_ESTADO].astype(str).str.upper().str.strip() == TXT_LNC_COND).sum() if C_ESTADO in x.columns else 0,
+            'Otros': ((x[C_ESTADO].astype(str).str.upper().str.strip() == TXT_REMED) | 
+                      (~x[C_ESTADO].astype(str).str.upper().str.strip().isin([TXT_LE, TXT_LNC, TXT_LNC_COND, '']))).sum() if C_ESTADO in x.columns else 0,
             
-            'AP MES': ((x['decision'] == 'A') & (x['fecha_decision'].dt.month == mes_sel)).sum(),
-            'AP COSECHA': ((x['decision'] == 'A') & (x['fecha_decision'].dt.month != mes_sel)).sum(),
+            # Decisiones
+            'EVALUADO': (x[C_DECISION].astype(str).str.strip() != "-").sum() if C_DECISION in x.columns else 0,
+            'NO GESTIONADO': (x[C_DECISION].astype(str).str.strip() == "-").sum() if C_DECISION in x.columns else 0,
+            'Declinado': (x[C_DECISION].astype(str).str.upper().str.strip() == "D").sum() if C_DECISION in x.columns else 0,
+            'Cancelado': (x[C_DECISION].astype(str).str.upper().str.strip() == "C").sum() if C_DECISION in x.columns else 0,
+            'Pendiente': (x[C_DECISION].astype(str).str.upper().str.strip() == "P").sum() if C_DECISION in x.columns else 0,
             
-            # Variables de las otras hojas (tomamos el máximo porque son fijas por día gracias al merge local)
+            # Cosechas
+            'AP MES': ((x[C_DECISION].astype(str).str.upper().str.strip() == "A") & (pd.to_datetime(x[C_FECHA_DEC], errors='coerce').dt.month == mes_sel)).sum() if (C_DECISION in x.columns and C_FECHA_DEC in x.columns) else 0,
+            'AP COSECHA': ((x[C_DECISION].astype(str).str.upper().str.strip() == "A") & (pd.to_datetime(x[C_FECHA_DEC], errors='coerce').dt.month != mes_sel)).sum() if (C_DECISION in x.columns and C_FECHA_DEC in x.columns) else 0,
+            
+            # Columnas cruzadas de otras hojas (Planta, PPTO, Malla)
             'Agentes Log': x['agentes_log'].max() if 'agentes_log' in x.columns else 0,
             'Agentes Plantilla': x['agentes_plantilla'].max() if 'agentes_plantilla' in x.columns else 0,
             'meta_dia': x['meta_dia'].max() if 'meta_dia' in x.columns else 0,
             'meta_asesor': x['meta_asesor'].max() if 'meta_asesor' in x.columns else 0,
             'tiempo_real': x['tiempo_real'].max() if 'tiempo_real' in x.columns else 0
-        })).reset_index().rename(columns={'fecha_vta': 'Fecha'})
+        })).reset_index()
     else:
         agrupado = pd.DataFrame(columns=['Fecha', 'Tramites', 'Lead Efectivo'])
 
-    # --- UNIR CON EL CALENDARIO ---
-    df_final = pd.merge(df_cal, agrupado, on="Fecha", how="left").fillna(0)
+    # --- CRUCE CON CALENDARIO HÁBIL ---
+    df_final = pd.merge(df_cal, agrupado, left_on="Fecha", right_on=C_FECHA_VTA, how="left").fillna(0)
     
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
     df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[row['Día_Semana']]}-{row['Fecha'].strftime('%d-%b')}".lower(), axis=1)
 
-    # --- FORMULAS MATEMÁTICAS APLICADAS (Exactas a tu solicitud) ---
-    df_final['Meta Lead Efectivos Programados'] = df_final['meta_asesor'] * df_final['Agentes Plantilla']
-    df_final['Meta Lead Efectivos Asistieron'] = df_final['meta_asesor'] * df_final['Agentes Log']
+    # --- FÓRMULAS GERENCIALES (Exactas a tu tabla) ---
+    df_final['Meta Lead Efectivos Programados'] = df_final.get('meta_asesor', 0) * df_final.get('Agentes Plantilla', 0)
+    df_final['Meta Lead Efectivos Asistieron'] = df_final.get('meta_asesor', 0) * df_final.get('Agentes Log', 0)
     df_final['Diferencia'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Asistieron']
-    
+
     df_final['% LE'] = np.where(df_final['Tramites'] > 0, df_final['Lead Efectivo'] / df_final['Tramites'], 0)
     df_final['% REM/RECH'] = np.where(df_final['Tramites'] > 0, df_final['Otros'] / df_final['Tramites'], 0)
     
-    df_final['Prom'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Agentes Log'] / df_final['Lead Efectivo'], 0)
-    df_final['% Ausentismo'] = np.where(df_final['Agentes Plantilla'] > 0, df_final['Agentes Log'] / df_final['Agentes Plantilla'], 0)
-    df_final['SPH'] = np.where(df_final.get('tiempo_real', 0) > 0, df_final['Lead Efectivo'] / df_final['tiempo_real'], 0)
+    df_final['Prom'] = np.where(df_final['Lead Efectivo'] > 0, df_final.get('Agentes Log', 0) / df_final['Lead Efectivo'], 0)
+    df_final['% Ausentismo'] = np.where(df_final.get('Agentes Plantilla', 0) > 0, df_final.get('Agentes Log', 0) / df_final.get('Agentes Plantilla', 1), 0)
+    df_final['SPH'] = np.where(df_final.get('tiempo_real', 0) > 0, df_final['Lead Efectivo'] / df_final.get('tiempo_real', 1), 0)
     
     df_final['AP DIA'] = df_final['AP MES'] + df_final['AP COSECHA']
     df_final['AP Acum'] = np.where(df_final['Lead Efectivo'].cumsum() > 0, df_final['AP MES'].cumsum() / df_final['Lead Efectivo'].cumsum(), 0)
     
     df_final['Meta Día'] = df_final.get('meta_dia', 0)
     df_final['GAP'] = df_final['Meta Día'].cumsum() - df_final['Lead Efectivo'].cumsum()
-    
+
     df_final['% EVALUADO'] = np.where(df_final['Lead Efectivo'] > 0, df_final['EVALUADO'] / df_final['Lead Efectivo'], 0)
     df_final['% Declinado'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Declinado'] / df_final['Lead Efectivo'], 0)
     df_final['% Cancelado'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Cancelado'] / df_final['Lead Efectivo'], 0)
     df_final['% Pendiente'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Pendiente'] / df_final['Lead Efectivo'], 0)
 
+    # Orden exacto para mostrar
     columnas_vista = [
         'Día', 'Tramites', 'Lead Efectivo', 'Meta Lead Efectivos Programados', 'Meta Lead Efectivos Asistieron', 'Diferencia',
         'Lead No Capturado', 'Lead No Condiciones', 'Otros', '% LE', '% REM/RECH', 'Prom',
