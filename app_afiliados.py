@@ -25,14 +25,17 @@ if not df_raw.empty:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros Gerenciales")
     
-    if 'fecha' in df_raw.columns:
-        df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce').dt.date
-        fechas_validas = df_raw['fecha'].dropna()
+    # Detectar dinámicamente la columna de fecha
+    col_fecha = next((c for c in ['fecha', 'fecha_vta', 'fecha_reporte', 'index'] if c in df_raw.columns), df_raw.columns[0])
+
+    if col_fecha in df_raw.columns:
+        df_raw[col_fecha] = pd.to_datetime(df_raw[col_fecha], errors='coerce')
+        fechas_validas = df_raw[col_fecha].dropna()
         
-        años_disp = sorted(fechas_validas.apply(lambda x: x.year).unique()) if not fechas_validas.empty else [date.today().year]
+        años_disp = sorted(fechas_validas.dt.year.unique()) if not fechas_validas.empty else [date.today().year]
         año_sel = st.sidebar.selectbox("Año", años_disp, index=len(años_disp)-1)
         
-        meses_disp = sorted(fechas_validas[fechas_validas.apply(lambda x: x.year) == año_sel].apply(lambda x: x.month).unique()) if not fechas_validas.empty else [date.today().month]
+        meses_disp = sorted(fechas_validas[fechas_validas.dt.year == año_sel].dt.month.unique()) if not fechas_validas.empty else [date.today().month]
         nombres_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
         mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
         
@@ -41,14 +44,14 @@ if not df_raw.empty:
     else:
         año_sel, mes_sel, mes_sel_nombre = 2026, 11, "Noviembre"
 
-    # Filtrar mes y año
-    df_mes = df_raw[(pd.to_datetime(df_raw['fecha']).dt.year == año_sel) & 
-                    (pd.to_datetime(df_raw['fecha']).dt.month == mes_sel)].copy()
+    # Filtrar mes y año de manera segura
+    df_mes = df_raw[(df_raw[col_fecha].dt.year == año_sel) & 
+                    (df_raw[col_fecha].dt.month == mes_sel)].copy()
 
     # Formatear la columna Día (ej. lun-02-nov)
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
-    df_mes['Día_Semana'] = pd.to_datetime(df_mes['fecha']).dt.dayofweek
-    df_mes['Día'] = df_mes.apply(lambda row: f"{dias_esp.get(row['Día_Semana'], 'lun')}-{pd.to_datetime(row['fecha']).strftime('%d-%b')}".lower(), axis=1)
+    df_mes['Día_Semana'] = df_mes[col_fecha].dt.dayofweek
+    df_mes['Día'] = df_mes.apply(lambda row: f"{dias_esp.get(row['Día_Semana'], 'lun')}-{row[col_fecha].strftime('%d-%b')}".lower(), axis=1)
 
     # --- CÁLCULO DE FÓRMULAS ---
     df_mes['Meta Lead Efectivos Programados'] = df_mes.get('meta_asesor', 0) * df_mes.get('agentes_plantilla', 0)
@@ -63,7 +66,7 @@ if not df_raw.empty:
     
     df_mes['AP DIA'] = df_mes.get('ap_mes', 0) + df_mes.get('ap_cosecha', 0)
     df_mes['AP Acum'] = np.where(df_mes.get('lead_efectivo', 0).cumsum() > 0, df_mes.get('ap_mes', 0).cumsum() / df_mes['lead_efectivo'].cumsum(), 0)
-    df_mes['Meta Día'] = 279 # Meta estándar diaria
+    df_mes['Meta Día'] = 279 
     df_mes['GAP'] = df_mes['Meta Día'].cumsum() - df_mes.get('lead_efectivo', 0).cumsum()
     
     df_mes['% EVALUADO'] = np.where(df_mes.get('lead_efectivo', 0) > 0, df_mes.get('evaluado', 0) / df_mes['lead_efectivo'], 0)
@@ -71,7 +74,6 @@ if not df_raw.empty:
     df_mes['% Cancelado'] = np.where(df_mes.get('lead_efectivo', 0) > 0, df_mes.get('cancelado', 0) / df_mes['lead_efectivo'], 0)
     df_mes['% Pendiente'] = np.where(df_mes.get('lead_efectivo', 0) > 0, df_mes.get('pendiente', 0) / df_mes['lead_efectivo'], 0)
 
-    # Renombrar columnas para la vista gerencial
     renombres = {
         'tramites': 'Tramites', 'lead_efectivo': 'Lead Efectivo', 
         'lead_no_capturado': 'Lead No Capturado', 'lead_no_condiciones': 'Lead No Condiciones',
