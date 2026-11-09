@@ -30,7 +30,7 @@ if not df_raw.empty:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros Gerenciales")
     
-    # Buscar columna de fecha de venta (puede llamarse fecha_vta o similar)
+    # Buscar columna de fecha de venta
     col_fecha = next((c for c in ['fecha_vta', 'fecha', 'fecha_reporte'] if c in df_raw.columns), None)
     
     if col_fecha:
@@ -51,7 +51,7 @@ if not df_raw.empty:
             mes_sel = date.today().month
             mes_sel_nombre = nombres_meses[mes_sel]
             
-        # Filtro opcional de Asesor si existe la columna
+        # Filtro de Asesor si existe
         col_asesor = next((c for c in ['asesor', 'user', 'nombre_asesor'] if c in df_raw.columns), None)
         if col_asesor:
             asesores = ["Todos"] + sorted(df_raw[col_asesor].dropna().astype(str).unique().tolist())
@@ -70,19 +70,17 @@ if not df_raw.empty:
     df_cal = pd.DataFrame({"Fecha": fechas_mes})
     df_cal['Día_Semana'] = pd.to_datetime(df_cal['Fecha']).dt.dayofweek
     df_cal['Es_Festivo'] = df_cal['Fecha'].apply(lambda x: x in festivos_mx)
-    # Habil si NO es domingo (6) y NO es festivo
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))]
 
     # --- FILTRAR DATOS DEL MES ---
     df_filtro = df_raw[(df_raw[col_fecha].apply(lambda x: getattr(x, 'year', 0)) == año_sel) & 
-                       (df_raw[col_fecha].apply(lambda x: getattr(x, 'month', 0)) == mes_sel)].copy()
+                       (df_filtro_mes := df_raw[col_fecha].apply(lambda x: getattr(x, 'month', 0)) == mes_sel)].copy()
 
-    # Identificar nombres reales de columnas de estado y decisión
     col_estado = next((c for c in ['estado', 'status', 'tipificacion'] if c in df_filtro.columns), None)
     col_decision = next((c for c in ['decision', 'dec', 'estado_decision'] if c in df_filtro.columns), None)
     col_fec_dec = next((c for c in ['fecha_decision', 'fec_decision'] if c in df_filtro.columns), None)
 
-    # Agrupación diaria estilo CONTAR.SI.CONJUNTO
+    # Agrupación diaria
     if not df_filtro.empty and col_estado:
         agrupado = df_filtro.groupby(col_fecha).apply(lambda x: pd.Series({
             'Tramites': len(x),
@@ -92,18 +90,15 @@ if not df_raw.empty:
             'Otros': ((x[col_estado].astype(str).str.upper() == 'REMEDIACIÓN') | 
                       (~x[col_estado].astype(str).str.upper().isin(['LEAD EFECTIVO', 'LEAD NO CAPTURADO', 'LEAD NO CONDICIONES', '']))).sum(),
             
-            # Decisiones (AT)
             'EVALUADO': (x[col_decision].astype(str) != '-').sum() if col_decision else 0,
             'NO GESTIONADO': (x[col_decision].astype(str) == '-').sum() if col_decision else 0,
             'Declinado': (x[col_decision].astype(str).str.upper() == 'D').sum() if col_decision else 0,
             'Cancelado': (x[col_decision].astype(str).str.upper() == 'C').sum() if col_decision else 0,
             'Pendiente': (x[col_decision].astype(str).str.upper() == 'P').sum() if col_decision else 0,
             
-            # AP Mes y Cosecha
             'AP MES': ((x[col_decision].astype(str).str.upper() == 'A') & (pd.to_datetime(x[col_fec_dec], errors='coerce').dt.month == mes_sel)).sum() if (col_decision and col_fec_dec) else 0,
             'AP COSECHA': ((x[col_decision].astype(str).str.upper() == 'A') & (pd.to_datetime(x[col_fec_dec], errors='coerce').dt.month != mes_sel)).sum() if (col_decision and col_fec_dec) else 0,
             
-            # Auxiliares de planta / ppto / malla si vienen en la misma tabla
             'agentes_log': x['agentes_log'].mean() if 'agentes_log' in x.columns else 1,
             'agentes_plantilla': x['agentes_plantilla'].mean() if 'agentes_plantilla' in x.columns else 1,
             'meta_asesor': x['meta_asesor'].mean() if 'meta_asesor' in x.columns else 0,
@@ -113,13 +108,12 @@ if not df_raw.empty:
     else:
         agrupado = pd.DataFrame(columns=[col_fecha, 'Tramites', 'Lead Efectivo'])
 
-    # Unir con el calendario hábil oficial
     df_final = pd.merge(df_cal, agrupado, left_on="Fecha", right_on=col_fecha, how="left").fillna(0)
     
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
     df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[row['Día_Semana']]}-{row['Fecha'].strftime('%d-%b')}".lower(), axis=1)
 
-    # --- CÁLCULO DE FÓRMULAS EXACTAS ---
+    # --- CÁLCULO DE FÓRMULAS ---
     df_final['Meta Lead Efectivos Programados'] = df_final.get('meta_asesor', 0) * df_final.get('agentes_plantilla', 0)
     df_final['Meta Lead Efectivos Asistieron'] = df_final.get('meta_asesor', 0) * df_final.get('agentes_log', 0)
     df_final['Diferencia'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Asistieron']
@@ -140,7 +134,6 @@ if not df_raw.empty:
     df_final['% Cancelado'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Cancelado'] / df_final['Lead Efectivo'], 0)
     df_final['% Pendiente'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Pendiente'] / df_final['Lead Efectivo'], 0)
 
-    # Orden exacto de columnas solicitado
     columnas_vista = [
         'Día', 'Tramites', 'Lead Efectivo', 'Meta Lead Efectivos Programados', 'Meta Lead Efectivos Asistieron', 'Diferencia',
         'Lead No Capturado', 'Lead No Condiciones', 'Otros', '% LE', '% REM/RECH', 'Prom',
@@ -164,7 +157,6 @@ if not df_raw.empty:
     
     st.divider()
 
-    # Estilos y semáforos profesionales
     def semaforo_le(val):
         if not isinstance(val, float): return ''
         if val >= 0.90: return 'background-color: #c6e0b4; color: black;'
@@ -172,9 +164,10 @@ if not df_raw.empty:
         if val > 0: return 'background-color: #ffc000; color: black;'
         return ''
 
+    # Actualizado de applymap a map para compatibilidad con Pandas modernos
     styler = df_vista.style.format({col: '{:.0f}' for col in df_vista.columns if '%' not in col and col != 'Día'})\
                            .format({col: '{:.1%}' for col in df_vista.columns if '%' in col})\
-                           .applymap(semaforo_le, subset=['% LE'] if '% LE' in df_vista.columns else [])\
+                           .map(semaforo_le, subset=['% LE'] if '% LE' in df_vista.columns else [])\
                            .set_properties(**{'text-align': 'center', 'font-size': '12px'})
 
     st.dataframe(styler, use_container_width=True, height=600, hide_index=True)
