@@ -1589,15 +1589,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     st.plotly_chart(fig_barras3, use_container_width=True)
 
   # =========================================================================
-  # 📉 SECCIÓN: GRÁFICO DE TENDENCIA DE APROBACIÓN (% AP - ÚLTIMOS 4 MESES)
+  # 📉 SECCIÓN: GRÁFICO DE TENDENCIA DE APROBACIÓN (% AP MES — ÚLTIMOS 4 MESES)
   # =========================================================================
   st.divider()
   st.subheader("📉 Tendencia AP (% Aprobación Acumulada — ÚLTIMOS 4 MESES)")
   st.caption(
-      "Seguimiento acumulado diario de la tasa de aprobación (% AP) para los"
-      " últimos 4 meses. Para meses anteriores se utiliza (AP Mes + Cosecha) /"
-      " Leads Efectivos; para el mes en curso se utiliza AP Mes / Leads"
-      " Efectivos a la fecha."
+      "Seguimiento acumulado diario de la tasa de aprobación (% AP MES) para los"
+      " últimos 4 meses, calculado exclusivamente como AP Mes / Leads Efectivos"
+      " a la fecha (sin cosecha)."
   )
 
   # Determinación dinámica de los últimos 4 meses
@@ -1612,17 +1611,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
   def calcular_tendencia_mes(y, m, df_v):
     num_dias_m = calendar.monthrange(y, m)[1]
-    inicio_m = date(y, m, 1)
 
     df_v_mes = df_v[
         (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
         & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
     ]
-
-    f_dec_eff = df_v["F_DEC_EFF"]
-    dec_m_mask = (pd.to_datetime(f_dec_eff).dt.year == y) & (
-        pd.to_datetime(f_dec_eff).dt.month == m
-    )
 
     es_mes_actual_flag = (y == año_sel) and (m == mes_sel)
 
@@ -1647,6 +1640,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       )
       total_leads = leads_acum.sum()
 
+      # Conversión PURA de AP MES para TODOS los meses (sin cosecha)
       ap_mes_mask = (
           (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
           & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
@@ -1655,21 +1649,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       )
       ap_mes_acum = ap_mes_mask.sum()
 
-      ap_cos_mask = (
-          dec_m_mask
-          & (df_v["DECISION"] == "A")
-          & (pd.to_datetime(df_v["F_VTA"]) < pd.Timestamp(inicio_m))
-          & (pd.to_datetime(f_dec_eff).dt.date <= f_corte)
-      )
-      ap_cos_acum = ap_cos_mask.sum()
-
-      # Para el mes actual se evalúa solo AP MES; para meses anteriores se suman Cosecha + Mes
-      if es_mes_actual_flag:
-        ap_total_acum = ap_mes_acum
-      else:
-        ap_total_acum = ap_mes_acum + ap_cos_acum
-
-      pct = (ap_total_acum / total_leads * 100.0) if total_leads > 0 else 0.0
+      pct = (ap_mes_acum / total_leads * 100.0) if total_leads > 0 else 0.0
       dias.append(d)
       pct_acum_list.append(round(pct, 2))
 
