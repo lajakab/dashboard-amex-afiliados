@@ -11,7 +11,6 @@ st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 @st.cache_data
 def cargar_datos():
     try:
-        # Cargamos únicamente el archivo principal optimizado
         df = pd.read_parquet("Amex_Afiliados.parquet")
         df.columns = [str(c).strip().lower() for c in df.columns]
         return df
@@ -58,12 +57,11 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     df_cal['Es_Festivo'] = pd.to_datetime(df_cal['Fecha']).apply(lambda x: x in festivos_mx)
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
-    # --- PREPARACIÓN DE CAMPOS DESDE EL PARQUET UNIFICADO ---
+    # --- PREPARACIÓN DE CAMPOS DESDE EL PARQUET ---
     for col in ['agentes_plantilla', 'agentes_log', 'meta_dia', 'meta_asesor', 'tiempo_real']:
         if col not in df_raw.columns: df_raw[col] = 0
         df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
-    # Agrupar auxiliares por fecha de venta
     df_aux = df_raw.groupby('f_vta').agg({
         'agentes_plantilla': 'max',
         'agentes_log': 'max',
@@ -81,7 +79,7 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
 
     df_cal = pd.merge(df_cal, df_aux, on='Fecha', how='left').fillna(0)
 
-    # --- AGRUPACIÓN 1: TRÁMITES (POR FECHA DE VENTA) ---
+    # --- AGRUPACIÓN 1: TRÁMITES Y ESTADOS (POR FECHA DE VENTA) ---
     df_vta_mes = df_raw[(pd.to_datetime(df_raw['f_vta']).dt.year == año_sel) & (pd.to_datetime(df_raw['f_vta']).dt.month == mes_sel)]
     agrup_vta = df_vta_mes.groupby('f_vta').apply(lambda x: pd.Series({
         'Tramites': len(x),
@@ -96,16 +94,19 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
         'Pendiente': (x['decision'] == 'P').sum()
     })).reset_index().rename(columns={'f_vta': 'Fecha'})
 
-    # --- AGRUPACIÓN 2: APROBACIONES (POR FECHA DE DECISIÓN) ---
-    df_dec_mes = df_raw[(pd.to_datetime(df_raw['f_dec']).dt.year == año_sel) & (pd.to_datetime(df_raw['f_dec']).dt.month == mes_sel) & (df_raw['decision'] == 'A')]
-    agrup_dec = df_dec_mes.groupby('f_dec').apply(lambda x: pd.Series({
-        'AP MES': (pd.to_datetime(x['f_vta']).dt.month == mes_sel).sum(),
-        'AP COSECHA': (pd.to_datetime(x['f_vta']).dt.month != mes_sel).sum()
-    })).reset_index().rename(columns={'f_dec': 'Fecha'})
+    # --- AGRUPACIÓN 2: APROBACIONES (AP MES Y AP COSECHA) ---
+    # AP MES: Ventas cuya fecha_vta (columna E) es del mes en curso y tienen decisión 'A'
+    df_ap_mes = df_vta_mes[df_vta_mes['decision'] == 'A']
+    agrup_ap_mes = df_ap_mes.groupby('f_vta').size().reset_index(name='AP MES').rename(columns={'f_vta': 'Fecha'})
+
+    # AP COSECHA: Ventas de meses anteriores cuya decisión 'A' se registra en el mes en curso
+    df_ap_cos = df_raw[(pd.to_datetime(df_raw['f_dec']).dt.year == año_sel) & (pd.to_datetime(df_raw['f_dec']).dt.month == mes_sel) & (df_raw['decision'] == 'A') & (pd.to_datetime(df_raw['f_vta']).dt.month != mes_sel)]
+    agrup_ap_cos = df_ap_cos.groupby('f_dec').size().reset_index(name='AP COSECHA').rename(columns={'f_dec': 'Fecha'})
 
     # --- CRUCE FINAL Y CÁLCULOS ---
     df_final = pd.merge(df_cal, agrup_vta, on="Fecha", how="left").fillna(0)
-    df_final = pd.merge(df_final, agrup_dec, on="Fecha", how="left").fillna(0)
+    df_final = pd.merge(df_final, agrup_ap_mes, on="Fecha", how="left").fillna(0)
+    df_final = pd.merge(df_final, agrup_ap_cos, on="Fecha", how="left").fillna(0)
     
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
     df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[pd.to_datetime(row['Fecha']).dayofweek]}-{pd.to_datetime(row['Fecha']).strftime('%d-%b')}".lower(), axis=1)
@@ -208,4 +209,4 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
 
     st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 else:
-    st.warning("⚠️ No se encontró información en el archivo Parquet. Asegúrate de que el script local haya subido 'Amex_Afiliados.parquet'.")
+    st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
