@@ -1075,7 +1075,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 
   # =========================================================================
-  # 🚀 SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS (AJUSTADO)
+  # 🚀 SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS
   # =========================================================================
   st.divider()
   st.subheader("🎯 Análisis Comparativo de Capacidad y Desviación de Leads")
@@ -1108,7 +1108,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
   df_cap["Meta_Asesor_Dia"] = df_cap.apply(obtener_meta_asesor_dia, axis=1)
 
-  # RE-CÁLCULO EXACTO SOLICITADO PARA LEADS EFECTIVOS Y CAPACIDADES
+  # CÁLCULOS DE METAS Y LEADS REALIZADOS
   df_cap["Meta LE Contratados"] = (
       agentes_netos_contratados * df_cap["Meta_Asesor_Dia"]
   )
@@ -1232,7 +1232,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         "Seleccione el Día a Evaluar:", dias_disponibles, index=0
     )
 
-    row_d = df_cap[df_cap["Día"] == dia_sel_diag].iloc[0]
+    idx_curr = df_cap[df_cap["Día"] == dia_sel_diag].index[0]
+    row_d = df_cap.iloc[idx_curr]
 
     desv_cont = row_d["Desv vs Contratados"]
     desv_log = row_d["Desv vs Logueados"]
@@ -1240,6 +1241,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     imp_sph = row_d["Impacto Productividad SPH"]
     sph_real = row_d["SPH"]
     meta_as = row_d["Meta_Asesor_Dia"]
+    log_real = row_d["Agentes Log"]
 
     badge_cont = (
         f'<span class="arrow-badge-up">⬆️ Superávit (+{int(desv_cont):,} LE)</span>'
@@ -1251,6 +1253,97 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if desv_log >= 0
         else f'<span class="arrow-badge-down">⬇️ Déficit ({int(desv_log):,} LE)</span>'
     )
+
+    # ---------------------------------------------------------------------
+    # CÁLCULOS COMPARATIVOS AVANZADOS (DÍA ANTERIOR & DÍA DE LA SEMANA)
+    # ---------------------------------------------------------------------
+    # 1. Comparación con Día Anterior
+    if idx_curr > 0:
+      row_prev = df_cap.iloc[idx_curr - 1]
+      dia_prev_nombre = row_prev["Día"]
+      diff_sph_ayer = sph_real - row_prev["SPH"]
+      diff_log_ayer = log_real - row_prev["Agentes Log"]
+      diff_le_ayer = row_d["Leads Realizados"] - row_prev["Leads Realizados"]
+
+      txt_sph_ayer = (
+          f"mejora de <b style='color:#15803d;'>+{diff_sph_ayer:.1f} SPH</b>"
+          if diff_sph_ayer >= 0
+          else f"caída de <b style='color:#b91c1c;'>{diff_sph_ayer:.1f} SPH</b>"
+      )
+      txt_log_ayer = (
+          f"<b>+{int(diff_log_ayer)} asesores logueados</b>"
+          if diff_log_ayer >= 0
+          else f"<b>{int(diff_log_ayer)} asesores logueados</b>"
+      )
+      txt_le_ayer = (
+          f"<b>+{int(diff_le_ayer):,} LE</b>"
+          if diff_le_ayer >= 0
+          else f"<b>{int(diff_le_ayer):,} LE</b>"
+      )
+
+      comp_ayer_html = (
+          f"• <b>vs Día Anterior ({dia_prev_nombre}):</b> Se registra una variación de {txt_le_ayer} "
+          f"en volumen, respaldada por {txt_log_ayer} y una {txt_sph_ayer} en la tasa de conversión por hora."
+      )
+    else:
+      comp_ayer_html = (
+          "• <b>vs Día Anterior:</b> Primer día registrado del periodo en evaluación."
+      )
+
+    # 2. Comparación con Mismos Días de la Semana Anteriores (Histórico del mismo día)
+    dow_curr = (
+        row_d["Día_Semana"]
+        if "Día_Semana" in row_d
+        else pd.to_datetime(row_d["Fecha"]).dayofweek
+    )
+    nombre_dow = (
+        row_d["Nombre_Día"]
+        if "Nombre_Día" in row_d
+        else dias_nombres_map.get(dow_curr, "Día")
+    )
+
+    df_mismo_dow = df_cap.iloc[:idx_curr]
+    if "Día_Semana" in df_mismo_dow.columns:
+      df_mismo_dow = df_mismo_dow[df_mismo_dow["Día_Semana"] == dow_curr]
+    else:
+      df_mismo_dow = df_mismo_dow[
+          df_mismo_dow["Fecha"].apply(lambda f: pd.to_datetime(f).dayofweek)
+          == dow_curr
+      ]
+
+    if not df_mismo_dow.empty:
+      prom_sph_dow = df_mismo_dow["SPH"].mean()
+      prom_log_dow = df_mismo_dow["Agentes Log"].mean()
+      diff_sph_dow = sph_real - prom_sph_dow
+      diff_log_dow = log_real - prom_log_dow
+
+      txt_sph_dow = (
+          f"<b style='color:#15803d;'>+{diff_sph_dow:.1f} SPH</b> por encima"
+          if diff_sph_dow >= 0
+          else f"<b style='color:#b91c1c;'>{diff_sph_dow:.1f} SPH</b> por debajo"
+      )
+      txt_log_dow = (
+          f"<b>+{diff_log_dow:+.1f} agentes</b>"
+          if diff_log_dow >= 0
+          else f"<b>{diff_log_dow:+.1f} agentes</b>"
+      )
+
+      comp_dow_html = (
+          f"• <b>vs Promedio de {nombre_dow}s Anteriores:</b> SPH se ubica {txt_sph_dow} "
+          f"del promedio del día ({prom_sph_dow:.1f} SPH), con una asistencia de {txt_log_dow} frente a su media ({prom_log_dow:.1f} agentes)."
+      )
+    else:
+      comp_dow_html = (
+          f"• <b>vs Promedio de {nombre_dow}s Anteriores:</b> Corresponde al primer {nombre_dow} del mes."
+      )
+
+    # Texto de conclusión base según causales
+    if imp_sph > abs(imp_aus) and desv_cont >= 0:
+      concl_base = "El superávit fue impulsado principalmente por una alta productividad individual (SPH) que compensó holgadamente el ausentismo."
+    elif abs(imp_aus) > abs(imp_sph) and desv_cont < 0:
+      concl_base = "El déficit responde primordialmente al faltante de personal logueado en piso de ventas."
+    else:
+      concl_base = "El resultado refleja directamente el nivel de conversión y eficiencia horaria de los asesores activos."
 
     st.markdown(
         f"""
@@ -1274,8 +1367,13 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
                     • <b>Eficiencia Productiva (SPH):</b> Desempeño real de <b>{sph_real:.1f} LE/Agente</b> vs Meta del día de <b>{meta_as:.1f} LE/Agente</b>, aportando 
                     <b style="color:{'#15803d' if imp_sph >= 0 else '#b91c1c'}">{int(imp_sph):+,.0f} LE</b> de desviación por productividad.
                 </div>
-                <div style="background-color:#f8fafc; padding:8px 10px; border-radius:6px; margin-top:8px; font-size:12px; color:#475569; border-left:3px solid #0284c7;">
-                    <b>Conclusión:</b> {'El superávit fue impulsado por una alta productividad individual (SPH) que compensó el ausentismo.' if imp_sph > abs(imp_aus) and desv_cont >= 0 else ('El déficit responde principalmente al faltante de personal logueado en piso.' if abs(imp_aus) > abs(imp_sph) and desv_cont < 0 else 'El resultado refleja la diferencia en la tasa de conversión por hora de los asesores activos.')}
+                <div style="background-color:#f8fafc; padding:10px 12px; border-radius:6px; margin-top:10px; font-size:12px; color:#334155; border-left:4px solid #0284c7;">
+                    <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">📌 Conclusión & Análises de Tendencia:</div>
+                    <div style="margin-bottom:6px;">{concl_base}</div>
+                    <div style="border-top:1px solid #e2e8f0; padding-top:6px; font-size:11.5px; line-height:1.4;">
+                        <div style="margin-bottom:4px;">{comp_ayer_html}</div>
+                        <div>{comp_dow_html}</div>
+                    </div>
                 </div>
             </div>
         </div>
