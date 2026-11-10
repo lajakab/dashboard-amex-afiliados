@@ -8,60 +8,86 @@ import re
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS estilizado para tarjetas de alto impacto gerencial
+# CSS para Tarjetas Gerenciales y Termómetros de Cumplimiento
 st.markdown("""
 <style>
     .kpi-card {
         background-color: #ffffff;
-        border: 1px solid #e6e8eb;
+        border: 1px solid #e2e8f0;
         border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
-        margin-bottom: 10px;
+        padding: 14px 16px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+        margin-bottom: 8px;
     }
     .kpi-title {
-        font-size: 13px;
-        color: #6c757d;
-        font-weight: 600;
+        font-size: 12px;
+        color: #64748b;
+        font-weight: 700;
         text-transform: uppercase;
-        margin-bottom: 5px;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
     }
     .kpi-value {
         font-size: 26px;
-        font-weight: 700;
-        color: #1f2937;
+        font-weight: 800;
+        color: #0f172a;
+        line-height: 1.2;
     }
     .kpi-subtext {
         font-size: 12px;
-        color: #4b5563;
-        margin-top: 4px;
+        color: #475569;
+        margin-top: 3px;
     }
-    .kpi-badge-success {
-        color: #15803d;
-        font-weight: 600;
+    .kpi-badge-success { color: #16a34a; font-weight: 700; }
+    .kpi-badge-warning { color: #d97706; font-weight: 700; }
+    .kpi-badge-danger { color: #dc2626; font-weight: 700; }
+    
+    /* Termómetro / Bar de Progreso */
+    .thermo-bg {
+        background-color: #e2e8f0;
+        border-radius: 6px;
+        height: 7px;
+        width: 100%;
+        margin-top: 8px;
+        overflow: hidden;
     }
-    .kpi-badge-danger {
-        color: #b91c1c;
-        font-weight: 600;
+    .thermo-fill {
+        height: 100%;
+        border-radius: 6px;
+        transition: width 0.4s ease;
     }
+
     .table-card {
         background-color: #f8fafc;
         border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 12px;
+        border-radius: 10px;
+        padding: 12px 14px;
+        height: 100%;
     }
     .table-card-row {
         display: flex;
         justify-content: space-between;
-        padding: 4px 0;
+        padding: 6px 0;
         border-bottom: 1px solid #e2e8f0;
         font-size: 13px;
     }
-    .table-card-row:last-child {
-        border-bottom: none;
-    }
+    .table-card-row:last-child { border-bottom: none; }
 </style>
 """, unsafe_allow_html=True)
+
+def render_termometro(pct, invertido=False):
+    if invertido:
+        # Para ausentismo o indicadores donde menor es mejor
+        color = "#16a34a" if pct <= 0.05 else ("#d97706" if pct <= 0.08 else "#dc2626")
+    else:
+        color = "#dc2626" if pct < 0.80 else ("#d97706" if pct < 1.00 else "#16a34a")
+    
+    ancho = min(max(int(pct * 100), 0), 100)
+    return f"""
+    <div class="thermo-bg">
+        <div class="thermo-fill" style="width: {ancho}%; background-color: {color};"></div>
+    </div>
+    """
 
 @st.cache_data
 def cargar_pestanas():
@@ -76,7 +102,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros")
     
-    # 1. PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
+    # PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
     df_ventas['F_VTA'] = pd.to_datetime(df_ventas.iloc[:, 4], errors='coerce').dt.date
     df_ventas['ESTADO'] = df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
     df_ventas['DECISION'] = df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
@@ -103,7 +129,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if asesor_sel != "Todos":
             df_ventas = df_ventas[df_ventas[col_as] == asesor_sel]
 
-    # --- PARSER FECHAS ---
     def parse_fecha_sucia(serie, año):
         def extract_date(val):
             if pd.isna(val) or val == '' or val == 'nan': return pd.NaT
@@ -121,7 +146,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
             except: return pd.NaT
         return serie.apply(extract_date)
 
-    # --- CALENDARIO BASE ---
+    # CALENDARIO BASE
     festivos_mx = holidays.Mexico(years=año_sel)
     num_dias = calendar.monthrange(año_sel, mes_sel)[1]
     df_cal = pd.DataFrame({"Fecha": [date(año_sel, mes_sel, d) for d in range(1, num_dias + 1)]})
@@ -129,13 +154,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_cal['Es_Festivo'] = pd.to_datetime(df_cal['Fecha']).apply(lambda x: x in festivos_mx)
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
-    # --- HOJAS AUXILIARES Y METAS ---
+    # PREPARACIÓN PLANTA
     if not df_planta.empty and len(df_planta.columns) > 2:
         df_planta['Fecha'] = pd.to_datetime(df_planta.iloc[:, 0], errors='coerce').dt.date
         df_planta['Agentes Plantilla'] = pd.to_numeric(df_planta.iloc[:, 1], errors='coerce').fillna(0)
         df_planta['Agentes Log'] = pd.to_numeric(df_planta.iloc[:, 2], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_planta.groupby('Fecha').agg({'Agentes Plantilla':'max', 'Agentes Log':'max'}).reset_index(), on='Fecha', how='left')
 
+    # PREPARACIÓN SEG PPTO (AJ=35, AK=36, AL=37, AM=38, AN=39)
     if not df_ppto.empty and len(df_ppto.columns) > 35:
         df_ppto['Fecha'] = parse_fecha_sucia(df_ppto.iloc[:, 35], año_sel)
         df_ppto['Meta Día Lead Efectivo'] = pd.to_numeric(df_ppto.iloc[:, 36], errors='coerce').fillna(0) if len(df_ppto.columns) > 36 else 0
@@ -150,6 +176,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
             'Meta AP Cosecha':'max'
         }).reset_index(), on='Fecha', how='left')
 
+    # PREPARACIÓN MALLA DÍA Y SPH (Fecha=13, BN=65)
     if not df_malla.empty and len(df_malla.columns) > 13:
         df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13], año_sel)
         col_tr_idx = 65 if len(df_malla.columns) > 65 else next((i for i, c in enumerate(df_malla.columns) if 'tiempo' in str(c).lower()), -1)
@@ -161,7 +188,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if col not in df_cal.columns: df_cal[col] = 0
     df_cal = df_cal.fillna(0)
 
-    # --- AGRUPACIÓN VENTAS ---
+    # AGRUPACIÓN VENTAS
     df_ventas_vta = df_ventas[(pd.to_datetime(df_ventas['F_VTA']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_VTA']).dt.month == mes_sel)]
     agrup_vta = df_ventas_vta.groupby('F_VTA').apply(lambda x: pd.Series({
         'Tramites': len(x),
@@ -176,14 +203,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         'Pendiente': (x['DECISION'] == 'P').sum()
     })).reset_index().rename(columns={'F_VTA': 'Fecha'})
 
-    # --- AGRUPACIÓN APROBACIONES ---
+    # AGRUPACIÓN APROBACIONES
     df_ap_mes = df_ventas_vta[df_ventas_vta['DECISION'] == 'A']
     agrup_ap_mes = df_ap_mes.groupby('F_VTA').size().reset_index(name='AP MES').rename(columns={'F_VTA': 'Fecha'})
 
     df_ap_cos = df_ventas[(pd.to_datetime(df_ventas['F_DEC']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_DEC']).dt.month == mes_sel) & (df_ventas['DECISION'] == 'A') & (pd.to_datetime(df_ventas['F_VTA']).dt.month != mes_sel)]
     agrup_ap_cos = df_ap_cos.groupby('F_DEC').size().reset_index(name='AP COSECHA').rename(columns={'F_DEC': 'Fecha'})
 
-    # --- CRUCE Y CÁLCULOS ---
+    # CRUCE FINAL Y CÁLCULOS
     df_final = pd.merge(df_cal, agrup_vta, on="Fecha", how="left").fillna(0)
     df_final = pd.merge(df_final, agrup_ap_mes, on="Fecha", how="left").fillna(0)
     df_final = pd.merge(df_final, agrup_ap_cos, on="Fecha", how="left").fillna(0)
@@ -202,8 +229,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     
     df_final['% LE'] = np.where(df_final['Tramites'] > 0, df_final['Lead Efectivo'] / df_final['Tramites'], 0)
     df_final['% REM/RECH'] = np.where(df_final['Tramites'] > 0, df_final['Otros'] / df_final['Tramites'], 0)
-    
-    # PROMEDIO AJUSTADO: Lead Efectivo / Agentes Log
     df_final['Prom'] = np.where(df_final['Agentes Log'] > 0, df_final['Lead Efectivo'] / df_final['Agentes Log'], 0)
     df_final['% Ausentismo'] = np.where(df_final['Agentes Plantilla'] > 0, (df_final['Agentes Plantilla'] - df_final['Agentes Log']) / df_final['Agentes Plantilla'], 0)
     df_final['SPH'] = np.where(df_final['Tiempo Real'] > 0, df_final['Lead Efectivo'] / df_final['Tiempo Real'], 0)
@@ -211,10 +236,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_final['AP Totales'] = df_final['AP MES'] + df_final['AP COSECHA']
     df_final['% AP dia'] = np.where(df_final['Lead Efectivo'] > 0, df_final['AP Totales'] / df_final['Lead Efectivo'], 0)
     
-    # NUEVA COLUMNA: % Aprob Acum Mes
     df_final['% Aprob Acum Mes'] = np.where(df_final['Lead Efectivo'].cumsum() > 0, df_final['AP MES'].cumsum() / df_final['Lead Efectivo'].cumsum(), 0)
-    
-    # RENOMBRADA: % AP Acum
     df_final['% AP Acum'] = np.where(df_final['Lead Efectivo'].cumsum() > 0, df_final['AP Totales'].cumsum() / df_final['Lead Efectivo'].cumsum(), 0)
     
     df_final['% EVALUADO'] = np.where(df_final['Lead Efectivo'] > 0, df_final['EVALUADO'] / df_final['Lead Efectivo'], 0)
@@ -231,7 +253,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     ]
     df_vista = df_final[[c for c in columnas_vista if c in df_final.columns]].copy()
 
-    # --- FILA DE TOTALES ---
+    # FILA DE TOTALES
     totales = df_final.sum(numeric_only=True).to_dict()
     totales['Día'] = 'TOTAL'
     totales['% LE'] = totales['Lead Efectivo'] / totales['Tramites'] if totales.get('Tramites', 0) > 0 else 0
@@ -249,10 +271,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_totales = pd.DataFrame([totales])[df_vista.columns]
     df_vista = pd.concat([df_vista, df_totales], ignore_index=True)
 
-    # --- KPIS GERENCIALES SUPERIORES ---
+    # KPIS SUPERIORES Y CÁLCULOS DE METAS
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
-    # 1. Cálculo de Última Aprobación MES
     df_aprob_mes = df_final[df_final['AP MES'] > 0]
     if not df_aprob_mes.empty:
         ultimo_dia_ap = pd.to_datetime(df_aprob_mes['Fecha'].max()).strftime('%d-%b').lower()
@@ -261,10 +282,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         ultimo_dia_ap = "N/A"
         pct_ap_acum_mes_ultimo = 0
 
-    meta_ap_objetivo = 0.045 # 4.5%
+    meta_ap_objetivo = 0.045
     desv_ap = pct_ap_acum_mes_ultimo - meta_ap_objetivo
 
-    # Metas acumuladas a la fecha actual para KPIs
     df_pasado = df_final[df_final['Fecha'] < date.today()]
     meta_le_acum_fecha = df_pasado['Meta Día Lead Efectivo'].sum() if not df_pasado.empty else df_final['Meta Día Lead Efectivo'].sum()
     meta_le_total_mes = df_final['Meta Día Lead Efectivo'].sum()
@@ -279,38 +299,44 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     meta_ap_cos_total = df_final['Meta AP Cosecha'].sum()
     meta_ap_tot_total = meta_ap_mes_total + meta_ap_cos_total
 
-    # --- FILA SUPERIOR 1: LEADS, GAP, ÚLTIMA APROBACIÓN Y PLANTA ---
+    # TABLERO DE TARJETAS SUPERIORES CON TERMÓMETROS
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
 
     with col_kpi1:
+        badg = "kpi-badge-danger" if pct_cumpl_le_fecha < 0.80 else ("kpi-badge-warning" if pct_cumpl_le_fecha < 1.0 else "kpi-badge-success")
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">Leads Efectivos</div>
             <div class="kpi-value">{int(totales['Lead Efectivo']):,}</div>
             <div class="kpi-subtext">Meta Mes: <b>{int(meta_le_total_mes):,}</b> ({pct_cumpl_le_total:.1%})</div>
-            <div class="kpi-subtext">Cumpl. a la Fecha: <span class="kpi-badge-success">{pct_cumpl_le_fecha:.1%}</span></div>
+            <div class="kpi-subtext">Cumpl. a la Fecha: <span class="{badg}">{pct_cumpl_le_fecha:.1%}</span></div>
+            {render_termometro(pct_cumpl_le_fecha)}
         </div>
         """, unsafe_allow_html=True)
 
     with col_kpi2:
-        badge_class = "kpi-badge-danger" if totales['GAP LE'] < 0 else "kpi-badge-success"
+        pct_gap_cumpl = (totales['Lead Efectivo'] / meta_le_acum_fecha) if meta_le_acum_fecha > 0 else 0
+        badg = "kpi-badge-danger" if totales['GAP LE'] < 0 else "kpi-badge-success"
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">GAP LE Acumulado</div>
-            <div class="kpi-value <span class="{badge_class}">{int(totales['GAP LE']):,}</span></div>
+            <div class="kpi-value"><span class="{badg}">{int(totales['GAP LE']):,}</span></div>
             <div class="kpi-subtext">Esperado a la Fecha: <b>{int(meta_le_acum_fecha):,}</b></div>
-            <div class="kpi-subtext">Desviación: <span class="{badge_class}">{totales['GAP LE']/meta_le_acum_fecha:.1%}</span></div>
+            <div class="kpi-subtext">Cumpl. a la Fecha: <span class="{badg}">{pct_gap_cumpl:.1%}</span></div>
+            {render_termometro(pct_gap_cumpl)}
         </div>
         """, unsafe_allow_html=True)
 
     with col_kpi3:
-        badge_class_ap = "kpi-badge-success" if desv_ap >= 0 else "kpi-badge-danger"
+        pct_obj_ap = pct_ap_acum_mes_ultimo / meta_ap_objetivo if meta_ap_objetivo > 0 else 0
+        badg = "kpi-badge-danger" if desv_ap < 0 else "kpi-badge-success"
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">Últ. Aprobación ({ultimo_dia_ap})</div>
             <div class="kpi-value">{pct_ap_acum_mes_ultimo:.1%}</div>
             <div class="kpi-subtext">Objetivo: <b>4.5%</b></div>
-            <div class="kpi-subtext">Desviación: <span class="{badge_class_ap}">{desv_ap:+.1%}</span></div>
+            <div class="kpi-subtext">Desviación: <span class="{badg}">{desv_ap:+.1%}</span></div>
+            {render_termometro(pct_obj_ap)}
         </div>
         """, unsafe_allow_html=True)
 
@@ -324,51 +350,58 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
             <div class="table-card-row"><span>Prom. Agentes Plantilla:</span> <b>{prom_plantilla:.0f}</b></div>
             <div class="table-card-row"><span>Prom. Agentes Log:</span> <b>{prom_log:.0f}</b></div>
             <div class="table-card-row"><span>% Ausentismo Prom.:</span> <b style="color:#d97706">{pct_aus:.1%}</b></div>
+            {render_termometro(pct_aus, invertido=True)}
         </div>
         """, unsafe_allow_html=True)
 
-    # --- FILA SUPERIOR 2: APROBACIONES DETALLADAS VS METAS ---
+    # TARJETAS DE APROBACIÓN
     col_ap1, col_ap2, col_ap3 = st.columns(3)
 
     with col_ap1:
         cumpl_ap_mes_fecha = totales['AP MES'] / meta_ap_mes_fecha if meta_ap_mes_fecha > 0 else 0
         cumpl_ap_mes_tot = totales['AP MES'] / meta_ap_mes_total if meta_ap_mes_total > 0 else 0
+        badg = "kpi-badge-danger" if cumpl_ap_mes_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_mes_fecha < 1.0 else "kpi-badge-success")
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">AP MES (Total)</div>
             <div class="kpi-value">{int(totales['AP MES'])}</div>
-            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_mes_fecha)}</b> ({cumpl_ap_mes_fecha:.1%})</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_mes_fecha)}</b> (<span class="{badg}">{cumpl_ap_mes_fecha:.1%}</span>)</div>
             <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_mes_total)}</b> ({cumpl_ap_mes_tot:.1%})</div>
+            {render_termometro(cumpl_ap_mes_fecha)}
         </div>
         """, unsafe_allow_html=True)
 
     with col_ap2:
         cumpl_ap_cos_fecha = totales['AP COSECHA'] / meta_ap_cos_fecha if meta_ap_cos_fecha > 0 else 0
         cumpl_ap_cos_tot = totales['AP COSECHA'] / meta_ap_cos_total if meta_ap_cos_total > 0 else 0
+        badg = "kpi-badge-danger" if cumpl_ap_cos_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_cos_fecha < 1.0 else "kpi-badge-success")
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">AP Cosecha (Total)</div>
             <div class="kpi-value">{int(totales['AP COSECHA'])}</div>
-            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_cos_fecha)}</b> ({cumpl_ap_cos_fecha:.1%})</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_cos_fecha)}</b> (<span class="{badg}">{cumpl_ap_cos_fecha:.1%}</span>)</div>
             <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_cos_total)}</b> ({cumpl_ap_cos_tot:.1%})</div>
+            {render_termometro(cumpl_ap_cos_fecha)}
         </div>
         """, unsafe_allow_html=True)
 
     with col_ap3:
         cumpl_ap_tot_fecha = totales['AP Totales'] / meta_ap_tot_fecha if meta_ap_tot_fecha > 0 else 0
         cumpl_ap_tot_tot = totales['AP Totales'] / meta_ap_tot_total if meta_ap_tot_total > 0 else 0
+        badg = "kpi-badge-danger" if cumpl_ap_tot_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_tot_fecha < 1.0 else "kpi-badge-success")
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-title">AP Totales</div>
             <div class="kpi-value">{int(totales['AP Totales'])}</div>
-            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_tot_fecha)}</b> ({cumpl_ap_tot_fecha:.1%})</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_tot_fecha)}</b> (<span class="{badg}">{cumpl_ap_tot_fecha:.1%}</span>)</div>
             <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_tot_total)}</b> ({cumpl_ap_tot_tot:.1%})</div>
+            {render_termometro(cumpl_ap_tot_fecha)}
         </div>
         """, unsafe_allow_html=True)
 
     st.divider()
 
-    # --- FORMATO DE LA TABLA ---
+    # FORMATO Y RESALTADO DE LA TABLA
     format_dict = {}
     for c in df_vista.columns:
         if c == 'Día': continue
@@ -383,11 +416,20 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if val > 0: return 'background-color: #ffc000; color: black;'
         return ''
 
+    def resaltar_fila_especial(row):
+        styles = [''] * len(row)
+        # Resaltar Fila de Totales
+        if row['Día'] == 'TOTAL':
+            return ['font-weight: bold; background-color: #f0f2f6'] * len(row)
+        # Resaltar Fila del Último Día de Aprobación
+        if ultimo_dia_ap != "N/A" and ultimo_dia_ap in str(row['Día']):
+            return ['background-color: #dbeafe; font-weight: bold; border-left: 4px solid #2563eb'] * len(row)
+        return styles
+
     styler = df_vista.style.format(format_dict)\
                            .map(semaforo_le, subset=['% LE'] if '% LE' in df_vista.columns else [])\
-                           .set_properties(**{'text-align': 'center', 'font-size': '13px'})
-                           
-    styler = styler.apply(lambda x: ['font-weight: bold; background-color: #f0f2f6' if x.name == len(df_vista)-1 else '' for i in x], axis=1)
+                           .set_properties(**{'text-align': 'center', 'font-size': '13px'})\
+                           .apply(resaltar_fila_especial, axis=1)
 
     st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 else:
