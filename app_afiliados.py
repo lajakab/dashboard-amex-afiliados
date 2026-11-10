@@ -225,6 +225,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   else:
     df_ventas["F_DEC"] = pd.NaT
 
+  df_ventas["F_DEC_EFF"] = df_ventas["F_DEC"].fillna(df_ventas["F_VTA"])
+
   fechas_validas = pd.Series(df_ventas["F_VTA"]).dropna()
   años_disp = (
       sorted(pd.to_datetime(fechas_validas).dt.year.unique())
@@ -519,26 +521,34 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       .rename(columns={"F_VTA": "Fecha"})
   )
 
-  # AGRUPACIÓN APROBACIONES
-  df_ap_mes = df_ventas_vta[df_ventas_vta["DECISION"] == "A"]
+  # AGRUPACIÓN APROBACIONES (REGLA EXACTA AP MES Y COSECHA)
+  inicio_mes_sel = date(año_sel, mes_sel, 1)
+
+  df_ap_mes = df_ventas[
+      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
+      & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel)
+      & (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
+      & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
+      & (df_ventas["DECISION"] == "A")
+  ]
   agrup_ap_mes = (
-      df_ap_mes.groupby("F_VTA")
+      df_ap_mes.groupby("F_DEC_EFF")
       .size()
       .reset_index(name="AP MES")
-      .rename(columns={"F_VTA": "Fecha"})
+      .rename(columns={"F_DEC_EFF": "Fecha"})
   )
 
   df_ap_cos = df_ventas[
-      (pd.to_datetime(df_ventas["F_DEC"]).dt.year == año_sel)
-      & (pd.to_datetime(df_ventas["F_DEC"]).dt.month == mes_sel)
+      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
+      & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel)
+      & (pd.to_datetime(df_ventas["F_VTA"]) < pd.Timestamp(inicio_mes_sel))
       & (df_ventas["DECISION"] == "A")
-      & (pd.to_datetime(df_ventas["F_VTA"]).dt.month != mes_sel)
   ]
   agrup_ap_cos = (
-      df_ap_cos.groupby("F_DEC")
+      df_ap_cos.groupby("F_DEC_EFF")
       .size()
       .reset_index(name="AP COSECHA")
-      .rename(columns={"F_DEC": "Fecha"})
+      .rename(columns={"F_DEC_EFF": "Fecha"})
   )
 
   # CRUCE FINAL Y CÁLCULOS
@@ -1379,7 +1389,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     )
 
   # =========================================================================
-  # 📈 NUEVA SECCIÓN: GRÁFICO EJECUTIVO DE SEGUIMIENTO LE REAL VS PTO Y GAP
+  # 📈 MÓDULO DE GRÁFICOS EJECUTIVOS: SEGUIMIENTO LE REAL VS PTO & GAP
   # =========================================================================
   st.divider()
   st.subheader("📈 Seguimiento Visual LE Real vs. Pto Diario y GAP Acumulado")
@@ -1398,17 +1408,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       "📊 Gráfico de 3 Barras (Estilo Excel)",
   ])
 
-  # TAB 1: GRÁFICO COMBINADO EJECUTIVO (BARRAS META & REAL + LÍNEA GAP ACUMULADO)
   with tab_combo:
     fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Barras Meta PTTO
     fig_combo.add_trace(
         go.Bar(
             x=df_chart["Día"],
             y=df_chart["Meta LE Contratados"],
             name="LEADS EFECTIVOS PTTO",
-            marker_color="#ea580c",  # Naranja corporativo elegante
+            marker_color="#ea580c",
             text=df_chart["Meta LE Contratados"].astype(int),
             textposition="outside",
             textfont=dict(size=11, color="#1e293b", family="sans-serif"),
@@ -1417,13 +1425,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         secondary_y=False,
     )
 
-    # Barras Realizado
     fig_combo.add_trace(
         go.Bar(
             x=df_chart["Día"],
             y=df_chart["Leads Realizados"],
             name="LEADS EFECTIVOS REAL",
-            marker_color="#0284c7",  # Azul corporativo brillante
+            marker_color="#0284c7",
             text=df_chart["Leads Realizados"].astype(int),
             textposition="outside",
             textfont=dict(size=11, color="#1e293b", family="sans-serif"),
@@ -1432,7 +1439,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         secondary_y=False,
     )
 
-    # Línea GAP Acumulado en Eje Secundario
     fig_combo.add_trace(
         go.Scatter(
             x=df_chart["Día"],
@@ -1499,11 +1505,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
     st.plotly_chart(fig_combo, use_container_width=True)
 
-  # TAB 2: GRÁFICO DE 3 BARRAS IGUAL AL DE EXCEL (METRICAS EN 3 BARRAS AGRUPADAS)
   with tab_barras3:
     fig_barras3 = go.Figure()
 
-    # Bar 1: PTTO
     fig_barras3.add_trace(
         go.Bar(
             x=df_chart["Día"],
@@ -1517,7 +1521,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         )
     )
 
-    # Bar 2: REAL
     fig_barras3.add_trace(
         go.Bar(
             x=df_chart["Día"],
@@ -1531,7 +1534,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         )
     )
 
-    # Bar 3: DIFERENCIA NETA ACUMULADA
     fig_barras3.add_trace(
         go.Bar(
             x=df_chart["Día"],
@@ -1585,6 +1587,168 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     )
 
     st.plotly_chart(fig_barras3, use_container_width=True)
+
+  # =========================================================================
+  # 📉 NUEVA SECCIÓN: GRÁFICO DE TENDENCIA DE APROBACIÓN (% AP - ÚLTIMOS 4 MESES)
+  # =========================================================================
+  st.divider()
+  st.subheader("📉 Tendencia AP (% Aprobación Acumulada — ÚLTIMOS 4 MESES)")
+  st.caption(
+      "Seguimiento acumulado diario de la tasa de aprobación (% AP) para los"
+      " últimos 4 meses. Para meses anteriores se utiliza (AP Mes + Cosecha) /"
+      " Leads Efectivos; para el mes en curso se utiliza AP Mes / Leads"
+      " Efectivos."
+  )
+
+  # Determinación dinámica de los últimos 4 meses
+  meses_tendencia = []
+  for i in range(3, -1, -1):
+    m = mes_sel - i
+    y = año_sel
+    if m <= 0:
+      m += 12
+      y -= 1
+    meses_tendencia.append((y, m))
+
+  def calcular_tendencia_mes(y, m, es_mes_actual, df_v):
+    num_dias_m = calendar.monthrange(y, m)[1]
+    inicio_m = date(y, m, 1)
+
+    df_v_mes = df_v[
+        (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
+        & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
+    ]
+
+    f_dec_eff = df_v["F_DEC_EFF"]
+    dec_m_mask = (pd.to_datetime(f_dec_eff).dt.year == y) & (
+        pd.to_datetime(f_dec_eff).dt.month == m
+    )
+    df_dec_m = df_v[dec_m_mask]
+
+    if es_mes_actual and not df_dec_m.empty:
+      max_d = pd.to_datetime(
+          df_dec_m["F_DEC"].fillna(df_dec_m["F_VTA"])
+      ).dt.day.max()
+      max_d = min(int(max_d), num_dias_m)
+    else:
+      max_d = num_dias_m
+
+    dias = []
+    pct_acum_list = []
+
+    for d in range(1, max_d + 1):
+      f_corte = date(y, m, d)
+
+      leads_acum = (df_v_mes["ESTADO"] == "LEAD EFECTIVO") & (
+          df_v_mes["F_VTA"] <= f_corte
+      )
+      total_leads = leads_acum.sum()
+
+      ap_mes_mask = (
+          dec_m_mask
+          & (df_v["DECISION"] == "A")
+          & (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
+          & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
+          & (pd.to_datetime(f_dec_eff).dt.date <= f_corte)
+      )
+      ap_mes_acum = ap_mes_mask.sum()
+
+      ap_cos_mask = (
+          dec_m_mask
+          & (df_v["DECISION"] == "A")
+          & (pd.to_datetime(df_v["F_VTA"]) < pd.Timestamp(inicio_m))
+          & (pd.to_datetime(f_dec_eff).dt.date <= f_corte)
+      )
+      ap_cos_acum = ap_cos_mask.sum()
+
+      if es_mes_actual:
+        ap_total_acum = ap_mes_acum
+      else:
+        ap_total_acum = ap_mes_acum + ap_cos_acum
+
+      pct = (ap_total_acum / total_leads * 100.0) if total_leads > 0 else 0.0
+      dias.append(d)
+      pct_acum_list.append(round(pct, 2))
+
+    return dias, pct_acum_list
+
+  fig_tend = go.Figure()
+  colores_meses = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
+
+  for idx, (y_m, m_m) in enumerate(meses_tendencia):
+    es_actual = y_m == año_sel and m_m == mes_sel
+    dias_m, pcts_m = calcular_tendencia_mes(y_m, m_m, es_actual, df_ventas)
+
+    nombre_m = nombres_meses.get(m_m, str(m_m)).lower()
+    color_m = colores_meses[idx % len(colores_meses)]
+
+    text_labels = [""] * len(pcts_m)
+    if pcts_m:
+      last_val = pcts_m[-1]
+      text_labels[-1] = f"<b>{last_val:.1f}%</b>".replace(".", ",")
+
+    fig_tend.add_trace(
+        go.Scatter(
+            x=dias_m,
+            y=pcts_m,
+            name=nombre_m,
+            mode="lines+markers+text",
+            line=dict(color=color_m, width=3),
+            marker=dict(size=5, color=color_m),
+            text=text_labels,
+            textposition="top right",
+            textfont=dict(size=13, color=color_m, family="sans-serif"),
+            hovertemplate=(
+                f"<b>Días %{{x}} ({nombre_m}):</b> %{{y:.1f}}%<extra></extra>"
+            ),
+        )
+    )
+
+  m_inicio_str = nombres_meses[meses_tendencia[0][1]][:3]
+  m_fin_str = nombres_meses[meses_tendencia[-1][1]][:3]
+  yr_str = str(meses_tendencia[-1][0])[2:]
+
+  fig_tend.update_layout(
+      title=dict(
+          text=f"<b>Tendencia AP ({m_inicio_str}-{m_fin_str}-{yr_str})</b>",
+          font=dict(size=18, color="#0f172a"),
+          x=0.5,
+          xanchor="center",
+      ),
+      xaxis=dict(
+          title="Día del Mes",
+          tickmode="linear",
+          tick0=1,
+          dtick=1,
+          range=[0.5, 31.5],
+          showgrid=True,
+          gridcolor="#f1f5f9",
+          tickfont=dict(size=11, color="#334155"),
+      ),
+      yaxis=dict(
+          title="% Aprobación Acumulada",
+          ticksuffix="%",
+          showgrid=True,
+          gridcolor="#e2e8f0",
+          zeroline=True,
+          tickfont=dict(size=11, color="#475569"),
+      ),
+      plot_bgcolor="#ffffff",
+      paper_bgcolor="#ffffff",
+      height=520,
+      margin=dict(l=30, r=40, t=60, b=50),
+      legend=dict(
+          orientation="h",
+          yanchor="bottom",
+          y=-0.22,
+          xanchor="center",
+          x=0.5,
+          font=dict(size=12),
+      ),
+      hovermode="x unified",
+  )
+
+  st.plotly_chart(fig_tend, use_container_width=True)
 
 else:
   st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
