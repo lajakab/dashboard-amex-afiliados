@@ -8,75 +8,86 @@ import re
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS para Tarjetas Gerenciales y Termómetros Compactos
+# CSS para Tarjetas Gerenciales y Termómetros de Cumplimiento
 st.markdown("""
 <style>
     .kpi-card {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 12px 14px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        margin-bottom: 6px;
+        border-radius: 10px;
+        padding: 14px 16px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+        margin-bottom: 8px;
     }
     .kpi-title {
-        font-size: 11px;
+        font-size: 12px;
         color: #64748b;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        margin-bottom: 2px;
+        margin-bottom: 4px;
     }
     .kpi-value {
-        font-size: 24px;
+        font-size: 26px;
         font-weight: 800;
         color: #0f172a;
-        line-height: 1.1;
+        line-height: 1.2;
     }
     .kpi-subtext {
-        font-size: 11px;
+        font-size: 12px;
         color: #475569;
         margin-top: 3px;
     }
-    .kpi-badge-success { color: #22c55e; font-weight: 700; }
-    .kpi-badge-warning { color: #f59e0b; font-weight: 700; }
-    .kpi-badge-danger { color: #ef4444; font-weight: 700; }
+    .kpi-badge-success { color: #16a34a; font-weight: 700; }
+    .kpi-badge-warning { color: #d97706; font-weight: 700; }
+    .kpi-badge-danger { color: #dc2626; font-weight: 700; }
+    
+    /* Termómetro / Bar de Progreso */
+    .thermo-bg {
+        background-color: #e2e8f0;
+        border-radius: 6px;
+        height: 7px;
+        width: 100%;
+        margin-top: 8px;
+        overflow: hidden;
+    }
+    .thermo-fill {
+        height: 100%;
+        border-radius: 6px;
+        transition: width 0.4s ease;
+    }
 
     .table-card {
         background-color: #f8fafc;
         border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 10px 12px;
+        border-radius: 10px;
+        padding: 12px 14px;
         height: 100%;
     }
     .table-card-row {
         display: flex;
         justify-content: space-between;
-        padding: 4px 0;
+        padding: 6px 0;
         border-bottom: 1px solid #e2e8f0;
-        font-size: 12px;
+        font-size: 13px;
     }
     .table-card-row:last-child { border-bottom: none; }
 </style>
 """, unsafe_allow_html=True)
 
-def render_kpi_card(title, value, sub1, sub2, pct_cumpl, invertido=False):
+def render_termometro(pct, invertido=False):
     if invertido:
-        color = "#22c55e" if pct_cumpl <= 0.05 else ("#f59e0b" if pct_cumpl <= 0.08 else "#ef4444")
+        # Para ausentismo o indicadores donde menor es mejor
+        color = "#16a34a" if pct <= 0.05 else ("#d97706" if pct <= 0.08 else "#dc2626")
     else:
-        color = "#ef4444" if pct_cumpl < 0.80 else ("#f59e0b" if pct_cumpl < 1.00 else "#22c55e")
+        color = "#dc2626" if pct < 0.80 else ("#d97706" if pct < 1.00 else "#16a34a")
     
-    ancho = min(max(int(pct_cumpl * 100), 0), 100)
-    
-    return f"""<div class="kpi-card">
-<div class="kpi-title">{title}</div>
-<div class="kpi-value">{value}</div>
-<div class="kpi-subtext">{sub1}</div>
-<div class="kpi-subtext">{sub2}</div>
-<div style="background:#f1f5f9; border-radius:4px; height:6px; width:100%; margin-top:8px; overflow:hidden;">
-<div style="height:100%; width:{ancho}%; background:{color}; border-radius:4px;"></div>
-</div>
-</div>"""
+    ancho = min(max(int(pct * 100), 0), 100)
+    return f"""
+    <div class="thermo-bg">
+        <div class="thermo-fill" style="width: {ancho}%; background-color: {color};"></div>
+    </div>
+    """
 
 @st.cache_data
 def cargar_pestanas():
@@ -91,7 +102,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros")
     
-    # 1. PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
+    # PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
     df_ventas['F_VTA'] = pd.to_datetime(df_ventas.iloc[:, 4], errors='coerce').dt.date
     df_ventas['ESTADO'] = df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
     df_ventas['DECISION'] = df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
@@ -260,85 +271,88 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_totales = pd.DataFrame([totales])[df_vista.columns]
     df_vista = pd.concat([df_vista, df_totales], ignore_index=True)
 
-    # KPIS SUPERIORES Y CÁLCULOS AL DÍA DE LA ÚLTIMA APROBACIÓN
+    # KPIS SUPERIORES Y CÁLCULOS DE METAS
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
-    df_aprob_mes = df_final[df_final['AP Totales'] > 0]
+    df_aprob_mes = df_final[df_final['AP MES'] > 0]
     if not df_aprob_mes.empty:
-        fecha_corte = df_aprob_mes['Fecha'].max()
-        ultimo_dia_ap = pd.to_datetime(fecha_corte).strftime('%d-%b').lower()
-        pct_ap_acum_mes_ultimo = df_final[df_final['Fecha'] == fecha_corte].iloc[0]['% Aprob Acum Mes']
+        ultimo_dia_ap = pd.to_datetime(df_aprob_mes['Fecha'].max()).strftime('%d-%b').lower()
+        pct_ap_acum_mes_ultimo = df_aprob_mes.iloc[-1]['% Aprob Acum Mes']
     else:
-        fecha_corte = date.today()
         ultimo_dia_ap = "N/A"
         pct_ap_acum_mes_ultimo = 0
 
     meta_ap_objetivo = 0.045
     desv_ap = pct_ap_acum_mes_ultimo - meta_ap_objetivo
 
-    # Acumular metas estrictamente hasta la fecha del último día de aprobación (inclusive)
-    df_hasta_fecha = df_final[df_final['Fecha'] <= fecha_corte]
-    meta_le_acum_fecha = df_hasta_fecha['Meta Día Lead Efectivo'].sum()
+    df_pasado = df_final[df_final['Fecha'] < date.today()]
+    meta_le_acum_fecha = df_pasado['Meta Día Lead Efectivo'].sum() if not df_pasado.empty else df_final['Meta Día Lead Efectivo'].sum()
     meta_le_total_mes = df_final['Meta Día Lead Efectivo'].sum()
     pct_cumpl_le_total = (totales['Lead Efectivo'] / meta_le_total_mes) if meta_le_total_mes > 0 else 0
     pct_cumpl_le_fecha = (totales['Lead Efectivo'] / meta_le_acum_fecha) if meta_le_acum_fecha > 0 else 0
 
-    meta_ap_mes_fecha = df_hasta_fecha['Meta AP Mes'].sum()
-    meta_ap_cos_fecha = df_hasta_fecha['Meta AP Cosecha'].sum()
+    meta_ap_mes_fecha = df_pasado['Meta AP Mes'].sum() if not df_pasado.empty else df_final['Meta AP Mes'].sum()
+    meta_ap_cos_fecha = df_pasado['Meta AP Cosecha'].sum() if not df_pasado.empty else df_final['Meta AP Cosecha'].sum()
     meta_ap_tot_fecha = meta_ap_mes_fecha + meta_ap_cos_fecha
 
     meta_ap_mes_total = df_final['Meta AP Mes'].sum()
     meta_ap_cos_total = df_final['Meta AP Cosecha'].sum()
     meta_ap_tot_total = meta_ap_mes_total + meta_ap_cos_total
 
-    # TABLERO DE TARJETAS SUPERIORES CON TERMÓMETROS COMPACTOS Y LIMPIOS
+    # TABLERO DE TARJETAS SUPERIORES CON TERMÓMETROS
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
 
     with col_kpi1:
         badg = "kpi-badge-danger" if pct_cumpl_le_fecha < 0.80 else ("kpi-badge-warning" if pct_cumpl_le_fecha < 1.0 else "kpi-badge-success")
-        st.markdown(render_kpi_card(
-            "Leads Efectivos",
-            f"{int(totales['Lead Efectivo']):,}",
-            f"Meta Mes: <b>{int(meta_le_total_mes):,}</b> ({pct_cumpl_le_total:.1%})",
-            f"Cumpl. a la Fecha: <span class='{badg}'>{pct_cumpl_le_fecha:.1%}</span>",
-            pct_cumpl_le_fecha
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">Leads Efectivos</div>
+            <div class="kpi-value">{int(totales['Lead Efectivo']):,}</div>
+            <div class="kpi-subtext">Meta Mes: <b>{int(meta_le_total_mes):,}</b> ({pct_cumpl_le_total:.1%})</div>
+            <div class="kpi-subtext">Cumpl. a la Fecha: <span class="{badg}">{pct_cumpl_le_fecha:.1%}</span></div>
+            {render_termometro(pct_cumpl_le_fecha)}
+        </div>
+        """, unsafe_allow_html=True)
 
     with col_kpi2:
         pct_gap_cumpl = (totales['Lead Efectivo'] / meta_le_acum_fecha) if meta_le_acum_fecha > 0 else 0
         badg = "kpi-badge-danger" if totales['GAP LE'] < 0 else "kpi-badge-success"
-        st.markdown(render_kpi_card(
-            "GAP LE Acumulado",
-            f"<span class='{badg}'>{int(totales['GAP LE']):,}</span>",
-            f"Esperado a la Fecha: <b>{int(meta_le_acum_fecha):,}</b>",
-            f"Cumpl. a la Fecha: <span class='{badg}'>{pct_gap_cumpl:.1%}</span>",
-            pct_gap_cumpl
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">GAP LE Acumulado</div>
+            <div class="kpi-value"><span class="{badg}">{int(totales['GAP LE']):,}</span></div>
+            <div class="kpi-subtext">Esperado a la Fecha: <b>{int(meta_le_acum_fecha):,}</b></div>
+            <div class="kpi-subtext">Cumpl. a la Fecha: <span class="{badg}">{pct_gap_cumpl:.1%}</span></div>
+            {render_termometro(pct_gap_cumpl)}
+        </div>
+        """, unsafe_allow_html=True)
 
     with col_kpi3:
         pct_obj_ap = pct_ap_acum_mes_ultimo / meta_ap_objetivo if meta_ap_objetivo > 0 else 0
         badg = "kpi-badge-danger" if desv_ap < 0 else "kpi-badge-success"
-        st.markdown(render_kpi_card(
-            f"Últ. Aprobación ({ultimo_dia_ap})",
-            f"{pct_ap_acum_mes_ultimo:.1%}",
-            "Objetivo: <b>4.5%</b>",
-            f"Desviación: <span class='{badg}'>{desv_ap:+.1%}</span>",
-            pct_obj_ap
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">Últ. Aprobación ({ultimo_dia_ap})</div>
+            <div class="kpi-value">{pct_ap_acum_mes_ultimo:.1%}</div>
+            <div class="kpi-subtext">Objetivo: <b>4.5%</b></div>
+            <div class="kpi-subtext">Desviación: <span class="{badg}">{desv_ap:+.1%}</span></div>
+            {render_termometro(pct_obj_ap)}
+        </div>
+        """, unsafe_allow_html=True)
 
     with col_kpi4:
         prom_plantilla = df_final[df_final['Agentes Plantilla'] > 0]['Agentes Plantilla'].mean() if not df_final.empty else 0
         prom_log = df_final[df_final['Agentes Log'] > 0]['Agentes Log'].mean() if not df_final.empty else 0
         pct_aus = (prom_plantilla - prom_log) / prom_plantilla if prom_plantilla > 0 else 0
         
-        st.markdown(f"""<div class="table-card">
-<div class="table-card-row"><span>Prom. Agentes Plantilla:</span> <b>{prom_plantilla:.0f}</b></div>
-<div class="table-card-row"><span>Prom. Agentes Log:</span> <b>{prom_log:.0f}</b></div>
-<div class="table-card-row"><span>% Ausentismo Prom.:</span> <b style="color:#d97706">{pct_aus:.1%}</b></div>
-<div style="background:#f1f5f9; border-radius:4px; height:6px; width:100%; margin-top:8px; overflow:hidden;">
-<div style="height:100%; width:{min(max(int(pct_aus*100),0),100)}%; background:#22c55e; border-radius:4px;"></div>
-</div>
-</div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="table-card">
+            <div class="table-card-row"><span>Prom. Agentes Plantilla:</span> <b>{prom_plantilla:.0f}</b></div>
+            <div class="table-card-row"><span>Prom. Agentes Log:</span> <b>{prom_log:.0f}</b></div>
+            <div class="table-card-row"><span>% Ausentismo Prom.:</span> <b style="color:#d97706">{pct_aus:.1%}</b></div>
+            {render_termometro(pct_aus, invertido=True)}
+        </div>
+        """, unsafe_allow_html=True)
 
     # TARJETAS DE APROBACIÓN
     col_ap1, col_ap2, col_ap3 = st.columns(3)
@@ -347,41 +361,47 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         cumpl_ap_mes_fecha = totales['AP MES'] / meta_ap_mes_fecha if meta_ap_mes_fecha > 0 else 0
         cumpl_ap_mes_tot = totales['AP MES'] / meta_ap_mes_total if meta_ap_mes_total > 0 else 0
         badg = "kpi-badge-danger" if cumpl_ap_mes_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_mes_fecha < 1.0 else "kpi-badge-success")
-        st.markdown(render_kpi_card(
-            "AP MES (Total)",
-            f"{int(totales['AP MES'])}",
-            f"Meta a la Fecha: <b>{int(meta_ap_mes_fecha)}</b> (<span class='{badg}'>{cumpl_ap_mes_fecha:.1%}</span>)",
-            f"Meta Total Mes: <b>{int(meta_ap_mes_total)}</b> ({cumpl_ap_mes_tot:.1%})",
-            cumpl_ap_mes_fecha
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">AP MES (Total)</div>
+            <div class="kpi-value">{int(totales['AP MES'])}</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_mes_fecha)}</b> (<span class="{badg}">{cumpl_ap_mes_fecha:.1%}</span>)</div>
+            <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_mes_total)}</b> ({cumpl_ap_mes_tot:.1%})</div>
+            {render_termometro(cumpl_ap_mes_fecha)}
+        </div>
+        """, unsafe_allow_html=True)
 
     with col_ap2:
         cumpl_ap_cos_fecha = totales['AP COSECHA'] / meta_ap_cos_fecha if meta_ap_cos_fecha > 0 else 0
         cumpl_ap_cos_tot = totales['AP COSECHA'] / meta_ap_cos_total if meta_ap_cos_total > 0 else 0
         badg = "kpi-badge-danger" if cumpl_ap_cos_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_cos_fecha < 1.0 else "kpi-badge-success")
-        st.markdown(render_kpi_card(
-            "AP Cosecha (Total)",
-            f"{int(totales['AP COSECHA'])}",
-            f"Meta a la Fecha: <b>{int(meta_ap_cos_fecha)}</b> (<span class='{badg}'>{cumpl_ap_cos_fecha:.1%}</span>)",
-            f"Meta Total Mes: <b>{int(meta_ap_cos_total)}</b> ({cumpl_ap_cos_tot:.1%})",
-            cumpl_ap_cos_fecha
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">AP Cosecha (Total)</div>
+            <div class="kpi-value">{int(totales['AP COSECHA'])}</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_cos_fecha)}</b> (<span class="{badg}">{cumpl_ap_cos_fecha:.1%}</span>)</div>
+            <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_cos_total)}</b> ({cumpl_ap_cos_tot:.1%})</div>
+            {render_termometro(cumpl_ap_cos_fecha)}
+        </div>
+        """, unsafe_allow_html=True)
 
     with col_ap3:
         cumpl_ap_tot_fecha = totales['AP Totales'] / meta_ap_tot_fecha if meta_ap_tot_fecha > 0 else 0
         cumpl_ap_tot_tot = totales['AP Totales'] / meta_ap_tot_total if meta_ap_tot_total > 0 else 0
         badg = "kpi-badge-danger" if cumpl_ap_tot_fecha < 0.80 else ("kpi-badge-warning" if cumpl_ap_tot_fecha < 1.0 else "kpi-badge-success")
-        st.markdown(render_kpi_card(
-            "AP Totales",
-            f"{int(totales['AP Totales'])}",
-            f"Meta a la Fecha: <b>{int(meta_ap_tot_fecha)}</b> (<span class='{badg}'>{cumpl_ap_tot_fecha:.1%}</span>)",
-            f"Meta Total Mes: <b>{int(meta_ap_tot_total)}</b> ({cumpl_ap_tot_tot:.1%})",
-            cumpl_ap_tot_fecha
-        ), unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">AP Totales</div>
+            <div class="kpi-value">{int(totales['AP Totales'])}</div>
+            <div class="kpi-subtext">Meta a la Fecha: <b>{int(meta_ap_tot_fecha)}</b> (<span class="{badg}">{cumpl_ap_tot_fecha:.1%}</span>)</div>
+            <div class="kpi-subtext">Meta Total Mes: <b>{int(meta_ap_tot_total)}</b> ({cumpl_ap_tot_tot:.1%})</div>
+            {render_termometro(cumpl_ap_tot_fecha)}
+        </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
 
-    # FORMATO DE TABLA Y RESALTADO DE LA FILA DE ÚLTIMA APROBACIÓN
+    # FORMATO Y RESALTADO DE LA TABLA
     format_dict = {}
     for c in df_vista.columns:
         if c == 'Día': continue
@@ -398,10 +418,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
     def resaltar_fila_especial(row):
         styles = [''] * len(row)
+        # Resaltar Fila de Totales
         if row['Día'] == 'TOTAL':
             return ['font-weight: bold; background-color: #f0f2f6'] * len(row)
-        if ultimo_dia_ap != "N/A" and ultimo_dia_ap in str(row['Día']).lower():
-            return ['background-color: #dbeafe; font-weight: bold; border-left: 3px solid #2563eb'] * len(row)
+        # Resaltar Fila del Último Día de Aprobación
+        if ultimo_dia_ap != "N/A" and ultimo_dia_ap in str(row['Día']):
+            return ['background-color: #dbeafe; font-weight: bold; border-left: 4px solid #2563eb'] * len(row)
         return styles
 
     styler = df_vista.style.format(format_dict)\
