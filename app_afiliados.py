@@ -9,7 +9,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS para Tarjetas Gerenciales y Contenedores
+# CSS para Tarjetas Gerenciales, Contenedores y Alineación de Tabla
 st.markdown(
     """
 <style>
@@ -59,6 +59,11 @@ st.markdown(
         font-size: 12px;
     }
     .table-card-row:last-child { border-bottom: none; }
+    
+    /* Forzar centrado de celdas en la tabla */
+    [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+        text-align: center !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -96,6 +101,18 @@ def render_gauge_svg(pct):
     </div>"""
 
 
+# Helper para degradado de colores en RGB
+def interpolate_color(val, vmin, vmax, rgb_low, rgb_high):
+  if pd.isna(val) or vmin == vmax:
+    return ""
+  norm = (val - vmin) / (vmax - vmin)
+  norm = max(0.0, min(1.0, norm))
+  r = int(rgb_low[0] + norm * (rgb_high[0] - rgb_low[0]))
+  g = int(rgb_low[1] + norm * (rgb_high[1] - rgb_low[1]))
+  b = int(rgb_low[2] + norm * (rgb_high[2] - rgb_low[2]))
+  return f"background-color: rgb({r}, {g}, {b}); color: black;"
+
+
 @st.cache_data
 def cargar_pestanas():
   def load_pq(name):
@@ -121,7 +138,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   )
   st.sidebar.header("🔍 Filtros")
 
-  # PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
+  # PREPARACIÓN VENTAS
   df_ventas["F_VTA"] = pd.to_datetime(
       df_ventas.iloc[:, 4], errors="coerce"
   ).dt.date
@@ -244,6 +261,44 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   df_cal = df_cal[
       ~((df_cal["Día_Semana"] == 6) | (df_cal["Es_Festivo"]))
   ].copy()
+
+  # FILTROS ADICIONALES SIDEBAR (Día Semana, Fechas Específicas, Rango Fechas)
+  dias_nombres_map = {
+      0: "Lunes",
+      1: "Martes",
+      2: "Miércoles",
+      3: "Jueves",
+      4: "Viernes",
+      5: "Sábado",
+  }
+  df_cal["Nombre_Día"] = df_cal["Día_Semana"].map(dias_nombres_map)
+
+  dias_semana_sel = st.sidebar.multiselect(
+      "Día de la Semana",
+      options=list(dias_nombres_map.values()),
+      default=[],
+  )
+  if dias_semana_sel:
+    df_cal = df_cal[df_cal["Nombre_Día"].isin(dias_semana_sel)]
+
+  fechas_mes_disp = sorted(df_cal["Fecha"].unique())
+  fechas_sel = st.sidebar.multiselect(
+      "Fechas Específicas",
+      options=fechas_mes_disp,
+      format_func=lambda x: x.strftime("%d-%b-%Y"),
+  )
+  if fechas_sel:
+    df_cal = df_cal[df_cal["Fecha"].isin(fechas_sel)]
+
+  if not df_cal.empty:
+    min_f, max_f = df_cal["Fecha"].min(), df_cal["Fecha"].max()
+    rango_f = st.sidebar.date_input(
+        "Rango de Fechas", value=(min_f, max_f), min_value=min_f, max_value=max_f
+    )
+    if isinstance(rango_f, tuple) and len(rango_f) == 2:
+      df_cal = df_cal[
+          (df_cal["Fecha"] >= rango_f[0]) & (df_cal["Fecha"] <= rango_f[1])
+      ]
 
   # PREPARACIÓN PLANTA
   if not df_planta.empty and len(df_planta.columns) > 2:
@@ -421,7 +476,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       - df_final["Meta Lead Efectivos Log"]
   )
 
-  # GAP LE: (Leads Efectivos Acumulados) - (Meta Acumulada) hasta el día
   df_final["GAP LE"] = 0.0
   mask_pasado = df_final["Fecha"] < date.today()
   df_final.loc[mask_pasado, "GAP LE"] = (
@@ -491,6 +545,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       0,
   )
 
+  # SE AÑADE '% Aprob Acum Mes' JUSTO DESPUÉS DE '% AP dia'
   columnas_vista = [
       "Día",
       "Tramites",
@@ -583,10 +638,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   df_totales = pd.DataFrame([totales])[df_vista.columns]
   df_vista = pd.concat([df_vista, df_totales], ignore_index=True)
 
-  # KPIS SUPERIORES Y CÁLCULOS
+  # KPIS SUPERIORES
   st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
 
-  # Última Aprobación MES
   df_aprob_mes = df_final[df_final["AP MES"] > 0]
   if not df_aprob_mes.empty:
     fecha_corte = df_aprob_mes["Fecha"].max()
@@ -602,7 +656,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   meta_ap_objetivo = 0.045
   desv_ap = pct_ap_acum_mes_ultimo - meta_ap_objetivo
 
-  # ESTRICTAMENTE AL DÍA ANTERIOR (< date.today()) PARA LEADS Y GAP
   df_pasado = df_final[df_final["Fecha"] < date.today()]
   if df_pasado.empty:
     df_pasado = df_final[df_final["Fecha"] <= date.today()]
@@ -627,7 +680,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       (leads_acum_fecha / meta_le_acum_fecha) if meta_le_acum_fecha > 0 else 0
   )
 
-  # METAS DE AP AL DÍA DE LA ÚLTIMA APROBACIÓN
   df_hasta_ap = df_final[df_final["Fecha"] <= fecha_corte]
   meta_ap_mes_fecha = df_hasta_ap["Meta AP Mes"].sum()
   meta_ap_cos_fecha = df_hasta_ap["Meta AP Cosecha"].sum()
@@ -711,7 +763,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         unsafe_allow_html=True,
     )
 
-  # TARJETAS DE APROBACIÓN CON GAUGE SVG (FILA 2)
+  # TARJETAS DE APROBACIÓN (FILA 2)
   col_ap1, col_ap2, col_ap3 = st.columns(3)
 
   with col_ap1:
@@ -797,7 +849,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
   st.divider()
 
-  # FORMATO Y RESALTADO DE LA TABLA
+  # FORMATO DE DICCIONARIO
   format_dict = {}
   for c in df_vista.columns:
     if c == "Día":
@@ -809,33 +861,125 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     else:
       format_dict[c] = "{:.0f}"
 
-  def semaforo_le(val):
-    if not isinstance(val, (float, int)):
-      return ""
-    if val >= 0.90:
-      return "background-color: #c6e0b4; color: black;"
-    if val >= 0.80:
-      return "background-color: #ffe699; color: black;"
-    if val > 0:
-      return "background-color: #ffc000; color: black;"
-    return ""
+  # FORMATOS CONDICIONALES APLICADOS HASTA EL DÍA DE AYER
+  # Paletas de colores RGB
+  rgb_green = (198, 224, 180)  # Verde suave (#c6e0b4)
+  rgb_red = (248, 113, 113)  # Rojo suave (#f87171)
+  rgb_white = (255, 255, 255)  # Blanco (#ffffff)
 
-  def resaltar_fila_especial(row):
-    styles = [""] * len(row)
-    if row["Día"] == "TOTAL":
-      return ["font-weight: bold; background-color: #f0f2f6"] * len(row)
-    if ultimo_dia_ap != "N/A" and ultimo_dia_ap in str(row["Día"]).lower():
-      return [
-          "background-color: #dbeafe; font-weight: bold; border-left: 3px solid"
-          " #2563eb"
-      ] * len(row)
+  # Precalculamos valores mínimos y máximos hasta ayer
+  mask_hasta_ayer = df_final["Fecha"] < date.today()
+  df_pasado_vals = df_final[mask_hasta_ayer]
+
+  min_max_dict = {}
+  for col in [
+      "Lead Efectivo",
+      "% LE",
+      "% REM/RECH",
+      "Prom",
+      "SPH",
+      "% AP dia",
+      "% Aprob Acum Mes",
+      "% AP Acum",
+      "NO GESTIONADO",
+      "% EVALUADO",
+  ]:
+    if col == "Lead Efectivo":
+      df_no_sab = df_pasado_vals[
+          pd.to_datetime(df_pasado_vals["Fecha"]).dt.dayofweek != 5
+      ]
+      vmin = df_no_sab[col].min() if not df_no_sab.empty else 0
+      vmax = df_no_sab[col].max() if not df_no_sab.empty else 1
+    elif not df_pasado_vals.empty and col in df_pasado_vals.columns:
+      vmin = df_pasado_vals[col].min()
+      vmax = df_pasado_vals[col].max()
+    else:
+      vmin, vmax = 0, 1
+    min_max_dict[col] = (vmin, vmax)
+
+  def aplicar_formatos_condicionales(df_input):
+    # Dataframe de estilos vacío
+    styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
+
+    for idx, row in df_input.iterrows():
+      dia_str = str(row["Día"])
+
+      # Resalte Fila TOTAL
+      if dia_str == "TOTAL":
+        styles.loc[idx, :] = "font-weight: bold; background-color: #f0f2f6;"
+        continue
+
+      # Resalte Fila Última Aprobación (Azul Suave)
+      es_ultimo_ap = (
+          ultimo_dia_ap != "N/A" and ultimo_dia_ap in dia_str.lower()
+      )
+      base_style = (
+          "background-color: #dbeafe; font-weight: bold; border-left: 3px"
+          " solid #2563eb;"
+          if es_ultimo_ap
+          else ""
+      )
+
+      # Determinar si la fila corresponde a una fecha transcurrida (< ayer)
+      corresponde_pasado = False
+      if idx < len(df_final):
+        corresponde_pasado = df_final.iloc[idx]["Fecha"] < date.today()
+
+      for col in df_input.columns:
+        if base_style:
+          styles.loc[idx, col] = base_style
+
+        if not corresponde_pasado:
+          continue
+
+        val = row[col]
+        if not isinstance(val, (int, float, np.number)):
+          continue
+
+        # REGULARES CONDICIONALES
+        if col == "Lead Efectivo":
+          # Verde a Blanco sin contar sábados
+          es_sabado = "sáb" in dia_str.lower()
+          if not es_sabado:
+            vmin, vmax = min_max_dict["Lead Efectivo"]
+            styles.loc[idx, col] = interpolate_color(
+                val, vmin, vmax, rgb_white, rgb_green
+            )
+
+        elif col in [
+            "% LE",
+            "Prom",
+            "% AP dia",
+            "% Aprob Acum Mes",
+            "% AP Acum",
+            "% EVALUADO",
+        ]:
+          # Verde a Rojo (Mayor es verde, Menor es rojo)
+          vmin, vmax = min_max_dict[col]
+          styles.loc[idx, col] = interpolate_color(
+              val, vmin, vmax, rgb_red, rgb_green
+          )
+
+        elif col == "% REM/RECH":
+          # Rojo a Verde (Mayor es rojo, Menor es verde)
+          vmin, vmax = min_max_dict[col]
+          styles.loc[idx, col] = interpolate_color(
+              val, vmin, vmax, rgb_green, rgb_red
+          )
+
+        elif col in ["SPH", "NO GESTIONADO"]:
+          # Verde a Blanco
+          vmin, vmax = min_max_dict[col]
+          styles.loc[idx, col] = interpolate_color(
+              val, vmin, vmax, rgb_white, rgb_green
+          )
+
     return styles
 
   styler = (
       df_vista.style.format(format_dict)
-      .map(semaforo_le, subset=["% LE"] if "% LE" in df_vista.columns else [])
       .set_properties(**{"text-align": "center", "font-size": "13px"})
-      .apply(resaltar_fila_especial, axis=1)
+      .apply(aplicar_formatos_condicionales, axis=None)
   )
 
   st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
