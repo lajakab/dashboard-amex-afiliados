@@ -522,10 +522,13 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   )
 
   # AGRUPACIÓN APROBACIONES EN LA TABLA PRINCIPAL:
-  # 1) AP MES: Agrupadas por F_VTA para asignar cada venta a su día exacto (e.g. 4 el día 2, 3 el día 4)
+  # 1) AP MES: Ventas realizadas en el mes seleccionado Y DECIDIDAS en el mes seleccionado.
+  #    Se agrupan por F_VTA para reflejar la venta diaria sin cruzar cosechas de meses futuros.
   df_ap_mes = df_ventas[
       (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
       & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
+      & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
+      & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel)
       & (df_ventas["DECISION"] == "A")
   ]
   agrup_ap_mes = (
@@ -535,7 +538,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       .rename(columns={"F_VTA": "Fecha"})
   )
 
-  # 2) AP COSECHA: Agrupadas por F_DEC_EFF (Decisión en el mes en curso para ventas de meses anteriores)
+  # 2) AP COSECHA: Ventas realizadas ANTES del mes seleccionado Y DECIDIDAS en el mes seleccionado.
+  #    Se agrupan por F_DEC_EFF (día de decisión en el mes en curso).
   inicio_mes_sel = date(año_sel, mes_sel, 1)
   df_ap_cos = df_ventas[
       (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
@@ -1628,7 +1632,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
     # Para el mes en curso, se limita la serie hasta el último día que registra aprobaciones (Día 3)
     if es_mes_actual_flag:
-      df_ap_curr = df_v_mes[df_v_mes["DECISION"] == "A"]
+      df_ap_curr = df_v_mes[
+          (pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.year == y)
+          & (pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.month == m)
+          & (df_v_mes["DECISION"] == "A")
+      ]
       if not df_ap_curr.empty:
         max_d = int(pd.to_datetime(df_ap_curr["F_VTA"]).dt.day.max())
       else:
@@ -1647,10 +1655,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       )
       total_leads = leads_acum.sum()
 
-      # AP MES: Ventas del mes (y, m) aprobadas a la fecha de corte
+      # AP MES: Ventas del mes (y, m) DECIDIDAS en el mes (y, m) a la fecha de corte
       ap_mes_mask = (
           (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
           & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
+          & (pd.to_datetime(f_dec_eff).dt.year == y)
+          & (pd.to_datetime(f_dec_eff).dt.month == m)
           & (df_v["DECISION"] == "A")
           & (df_v["F_VTA"] <= f_corte)
       )
