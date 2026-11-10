@@ -50,8 +50,9 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     num_dias = calendar.monthrange(año_sel, mes_sel)[1]
     fechas_mes = [date(año_sel, mes_sel, d) for d in range(1, num_dias + 1)]
     df_cal = pd.DataFrame({"Fecha": fechas_mes})
-    df_cal['Fecha'] = pd.to_datetime(df_cal['Fecha'])
-    df_cal['Día_Semana'] = df_cal['Fecha'].dt.dayofweek
+    # Aseguramos formato fecha estándar .date()
+    df_cal['Fecha'] = pd.to_datetime(df_cal['Fecha']).dt.date
+    df_cal['Día_Semana'] = pd.to_datetime(df_cal['Fecha']).dt.dayofweek
     df_cal['Es_Festivo'] = df_cal['Fecha'].apply(lambda x: x in festivos_mx)
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
@@ -84,12 +85,17 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
             'Meta Asesor': x['meta_asesor'].max(),
             'Tiempo Real': x['tiempo_real'].max()
         })).reset_index().rename(columns={'fecha_vta': 'Fecha'})
+        
+        # Aseguramos también formato .date() en el resultado agrupado
+        agrupado['Fecha'] = pd.to_datetime(agrupado['Fecha']).dt.date
     else:
         agrupado = pd.DataFrame(columns=['Fecha', 'Tramites', 'Lead Efectivo'])
 
+    # UNIR CON EL CALENDARIO (Ambas columnas Fecha están normalizadas como .date())
     df_final = pd.merge(df_cal, agrupado, on="Fecha", how="left").fillna(0)
+    
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
-    df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[row['Día_Semana']]}-{row['Fecha'].strftime('%d-%b')}".lower(), axis=1)
+    df_final['Día'] = df_final.apply(lambda row: f"{dias_esp.get(pd.to_datetime(row['Fecha']).dayofweek, 'lun')}-{pd.to_datetime(row['Fecha']).strftime('%d-%b')}".lower(), axis=1)
 
     # --- FÓRMULAS GERENCIALES ---
     df_final['Meta Lead Efectivos Programados'] = df_final['meta_asesor'] * df_final['Agentes Plantilla']
@@ -147,4 +153,4 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
 
     st.dataframe(styler, use_container_width=True, height=600, hide_index=True)
 else:
-    st.warning("⚠️ No se detectó información. Ejecuta tu script local para actualizar el archivo Parquet.")
+    st.warning("⚠️ No se detectó información. Asegúrate de que el archivo Parquet esté actualizado en GitHub.")
