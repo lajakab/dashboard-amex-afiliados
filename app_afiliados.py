@@ -9,7 +9,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS para Tarjetas Gerenciales, Contenedores y Centrado Absoluto de Tabla
+# CSS para Tarjetas Gerenciales, Contenedores, Centrado Absoluto y Nuevo Panel Gerencial
 st.markdown(
     """
 <style>
@@ -67,6 +67,48 @@ st.markdown(
     div[data-testid="stDataFrame"] div[role="columnheader"] {
         text-align: center !important;
         justify-content: center !important;
+    }
+
+    /* Estilos Especiales para la Ficha Gerencial de Diagnóstico de Desviación */
+    .diag-box {
+        background-color: #ffffff;
+        border: 1.5px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 16px 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-top: 10px;
+    }
+    .diag-header {
+        font-size: 15px;
+        font-weight: 800;
+        color: #1e293b;
+        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 8px;
+        margin-bottom: 12px;
+    }
+    .arrow-badge-up {
+        background-color: #dcfce7;
+        color: #15803d;
+        font-weight: 800;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        display: inline-block;
+    }
+    .arrow-badge-down {
+        background-color: #fee2e2;
+        color: #b91c1c;
+        font-weight: 800;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        display: inline-block;
+    }
+    .causal-item {
+        font-size: 13px;
+        color: #334155;
+        margin-bottom: 6px;
+        line-height: 1.4;
     }
 </style>
 """,
@@ -225,6 +267,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   mes_sel = list(nombres_meses.keys())[
       list(nombres_meses.values()).index(mes_sel_nombre)
   ]
+
+  # Referencia por defecto de Agentes Contratados
+  agentes_contratados_ref = 71 if mes_sel == 11 else (74 if mes_sel == 10 else 71)
+  agentes_contratados_input = st.sidebar.number_input(
+      "Agentes Contratados (Base)",
+      min_value=1,
+      max_value=200,
+      value=agentes_contratados_ref,
+  )
 
   if "asesor" in [str(c).lower() for c in df_ventas.columns]:
     col_as = next(c for c in df_ventas.columns if "asesor" in str(c).lower())
@@ -526,7 +577,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       0,
   )
 
-  # AJUSTE REQUERIDO DE SPH: Lead Efectivo / Agentes Log
+  # SPH: Lead Efectivo / Agentes Log
   df_final["SPH"] = np.where(
       df_final["Agentes Log"] > 0,
       df_final["Lead Efectivo"] / df_final["Agentes Log"],
@@ -635,14 +686,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       if totales.get("Agentes Plantilla", 0) > 0
       else 0
   )
-
-  # AJUSTE SPH EN TOTALES
   totales["SPH"] = (
       totales["Lead Efectivo"] / totales["Agentes Log"]
       if totales.get("Agentes Log", 0) > 0
       else 0
   )
-
   totales["% AP dia"] = (
       totales["AP Totales"] / totales["Lead Efectivo"]
       if totales.get("Lead Efectivo", 0) > 0
@@ -1014,5 +1062,190 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   )
 
   st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
+
+  # =========================================================================
+  # 🚀 NUEVA SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS
+  # =========================================================================
+  st.divider()
+  st.subheader("🎯 Análisis Comparativo de Capacidad y Desviación de Leads")
+  st.caption(
+      "Evaluación diaria de Meta LE basada en Agentes Contratados ("
+      f"Base: {agentes_contratados_input}), Programados y Logueados con"
+      " diagnóstico de causalidad de impacto."
+  )
+
+  df_cap = df_final.copy()
+  df_cap["Agentes Contratados"] = agentes_contratados_input
+  df_cap["Agentes Programados"] = df_cap["Agentes Plantilla"]
+  df_cap["Agentes Log"] = df_cap["Agentes Log"]
+  df_cap["Ausencias Día"] = df_cap["Agentes Programados"] - df_cap["Agentes Log"]
+
+  df_cap["Meta LE Contratados"] = (
+      df_cap["Agentes Contratados"] * df_cap["Meta Asesor"]
+  )
+  df_cap["Meta LE Programados"] = (
+      df_cap["Agentes Programados"] * df_cap["Meta Asesor"]
+  )
+  df_cap["Meta LE Logueados"] = df_cap["Agentes Log"] * df_cap["Meta Asesor"]
+  df_cap["Leads Realizados"] = df_cap["Lead Efectivo"]
+
+  df_cap["Desv vs Contratados"] = (
+      df_cap["Leads Realizados"] - df_cap["Meta LE Contratados"]
+  )
+  df_cap["Desv vs Logueados"] = (
+      df_cap["Leads Realizados"] - df_cap["Meta LE Logueados"]
+  )
+
+  # Impactos cuantitativos de desviación (leads)
+  df_cap["Impacto Ausentismo"] = (
+      -1 * df_cap["Ausencias Día"] * df_cap["Meta Asesor"]
+  )
+  df_cap["Impacto Productividad SPH"] = (
+      df_cap["Leads Realizados"] - df_cap["Meta LE Logueados"]
+  )
+
+  cols_cap_vista = [
+      "Día",
+      "Agentes Contratados",
+      "Agentes Programados",
+      "Ausencias Día",
+      "Agentes Log",
+      "Meta LE Contratados",
+      "Meta LE Programados",
+      "Meta LE Logueados",
+      "Leads Realizados",
+      "SPH",
+      "Desv vs Contratados",
+      "Desv vs Logueados",
+  ]
+  df_cap_vista = df_cap[cols_cap_vista].copy()
+
+  # Totales Fila Capacidad
+  tot_cap = df_cap.sum(numeric_only=True).to_dict()
+  tot_cap["Día"] = "TOTAL"
+  tot_cap["Agentes Contratados"] = agentes_contratados_input
+  tot_cap["Agentes Programados"] = df_cap[df_cap["Agentes Programados"] > 0][
+      "Agentes Programados"
+  ].mean()
+  tot_cap["Agentes Log"] = df_cap[df_cap["Agentes Log"] > 0][
+      "Agentes Log"
+  ].mean()
+  tot_cap["Ausencias Día"] = (
+      tot_cap["Agentes Programados"] - tot_cap["Agentes Log"]
+  )
+  tot_cap["SPH"] = (
+      tot_cap["Leads Realizados"] / tot_cap["Agentes Log"]
+      if tot_cap["Agentes Log"] > 0
+      else 0
+  )
+  tot_cap["Desv vs Contratados"] = (
+      tot_cap["Leads Realizados"] - tot_cap["Meta LE Contratados"]
+  )
+  tot_cap["Desv vs Logueados"] = (
+      tot_cap["Leads Realizados"] - tot_cap["Meta LE Logueados"]
+  )
+
+  df_tot_cap = pd.DataFrame([tot_cap])[cols_cap_vista]
+  df_cap_vista = pd.concat([df_cap_vista, df_tot_cap], ignore_index=True)
+
+  # Formato numérico de la tabla de capacidad
+  format_cap = {
+      "Agentes Contratados": "{:.0f}",
+      "Agentes Programados": "{:.0f}",
+      "Ausencias Día": "{:.0f}",
+      "Agentes Log": "{:.0f}",
+      "Meta LE Contratados": "{:.0f}",
+      "Meta LE Programados": "{:.0f}",
+      "Meta LE Logueados": "{:.0f}",
+      "Leads Realizados": "{:.0f}",
+      "SPH": "{:.1f}",
+      "Desv vs Contratados": "{:+,.0f}",
+      "Desv vs Logueados": "{:+,.0f}",
+  }
+
+  def estilo_desviaciones(val):
+    if not isinstance(val, (int, float, np.number)):
+      return ""
+    if val > 0:
+      return "background-color: #dcfce7; color: #15803d; font-weight: bold;"
+    if val < 0:
+      return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
+    return ""
+
+  styler_cap = (
+      df_cap_vista.style.format(format_cap)
+      .set_properties(**{"text-align": "center !important", "font-size": "13px"})
+      .map(
+          estilo_desviaciones,
+          subset=["Desv vs Contratados", "Desv vs Logueados"],
+      )
+  )
+
+  col_t1, col_t2 = st.columns([2.2, 1])
+
+  with col_t1:
+    st.markdown("##### 📋 Matriz de Descomposición de Leads vs Capacidad")
+    st.dataframe(
+        styler_cap, use_container_width=True, height=450, hide_index=True
+    )
+
+  with col_t2:
+    st.markdown("##### 🔍 Diagnóstico Gerencial de Causa Raíz")
+
+    dias_disponibles = df_cap["Día"].tolist()
+    dia_sel_diag = st.selectbox(
+        "Seleccione el Día a Evaluar:", dias_disponibles, index=0
+    )
+
+    row_d = df_cap[df_cap["Día"] == dia_sel_diag].iloc[0]
+
+    desv_cont = row_d["Desv vs Contratados"]
+    desv_log = row_d["Desv vs Logueados"]
+    imp_aus = row_d["Impacto Ausentismo"]
+    imp_sph = row_d["Impacto Productividad SPH"]
+    sph_real = row_d["SPH"]
+    meta_as = row_d["Meta Asesor"]
+
+    badge_cont = (
+        f'<span class="arrow-badge-up">⬆️ Superávit (+{int(desv_cont):,} LE)</span>'
+        if desv_cont >= 0
+        else f'<span class="arrow-badge-down">⬇️ Déficit ({int(desv_cont):,} LE)</span>'
+    )
+    badge_log = (
+        f'<span class="arrow-badge-up">⬆️ Superávit (+{int(desv_log):,} LE)</span>'
+        if desv_log >= 0
+        else f'<span class="arrow-badge-down">⬇️ Déficit ({int(desv_log):,} LE)</span>'
+    )
+
+    st.markdown(
+        f"""
+        <div class="diag-box">
+            <div class="diag-header">📌 Informe de Causalidad — {dia_sel_diag.upper()}</div>
+            <div style="margin-bottom:12px;">
+                <div style="font-size:12px; color:#64748b; font-weight:700;">VS CONTRATADOS ({agentes_contratados_input}):</div>
+                <div style="margin-top:2px;">{badge_cont}</div>
+            </div>
+            <div style="margin-bottom:14px;">
+                <div style="font-size:12px; color:#64748b; font-weight:700;">VS LOGUEADOS ({int(row_d['Agentes Log'])}):</div>
+                <div style="margin-top:2px;">{badge_log}</div>
+            </div>
+            <div style="border-top: 1px dashed #cbd5e1; padding-top:10px;">
+                <div style="font-size:13px; font-weight:800; color:#0f172a; margin-bottom:6px;">Explicación de la Desviación:</div>
+                <div class="causal-item">
+                    • <b>Capacidad / Ausentismo:</b> {int(row_d['Ausencias Día'])} ausencias registradas significan un impacto de 
+                    <b style="color:{'#b91c1c' if imp_aus < 0 else '#15803d'}">{int(imp_aus):+,.0f} LE</b> sobre la meta inicial.
+                </div>
+                <div class="causal-item">
+                    • <b>Eficiencia Productiva (SPH):</b> Rendimiento real de <b>{sph_real:.1f} LE/Agente</b> vs Meta implícita de <b>{meta_as:.1f} LE/Agente</b>, aportando 
+                    <b style="color:{'#15803d' if imp_sph >= 0 else '#b91c1c'}">{int(imp_sph):+,.0f} LE</b> de desviación por desempeño.
+                </div>
+                <div style="background-color:#f8fafc; padding:8px 10px; border-radius:6px; margin-top:8px; font-size:12px; color:#475569; border-left:3px solid #0284c7;">
+                    <b>Conclusión:</b> {'El superávit fue impulsado principalmente por la alta productividad individual (SPH) que superó el ausentismo.' if imp_sph > abs(imp_aus) and desv_cont >= 0 else ('El déficit responde principalmente a la falta de personal logueado en piso.' if abs(imp_aus) > abs(imp_sph) and desv_cont < 0 else 'El resultado refleja un bajo rendimiento promedio en las horas trabajadas por los agentes logueados.')}
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 else:
   st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
