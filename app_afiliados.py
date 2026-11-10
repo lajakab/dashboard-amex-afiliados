@@ -9,7 +9,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS para Tarjetas Gerenciales, Contenedores, Centrado Absoluto y Nuevo Panel Gerencial
+# CSS para Tarjetas Gerenciales, Contenedores, Centrado Absoluto y Panel Gerencial
 st.markdown(
     """
 <style>
@@ -147,7 +147,7 @@ def render_gauge_svg(pct):
     </div>"""
 
 
-# Interpolación en 2 puntos (Ej. Blanco a Verde)
+# Interpolación en 2 puntos (Blanco a Verde)
 def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
   if pd.isna(val) or vmin == vmax:
     return ""
@@ -159,7 +159,7 @@ def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
   return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
 
 
-# Interpolación en 3 puntos con tono intermedio Naranja
+# Interpolación en 3 puntos con Naranja Intermedio
 def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
   if pd.isna(val) or vmin == vmax:
     return ""
@@ -268,13 +268,24 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       list(nombres_meses.values()).index(mes_sel_nombre)
   ]
 
-  # Referencia por defecto de Agentes Contratados
+  # REFERENCIA DE AGENTES CONTRATADOS Y AUSENTISMO TEÓRICO
   agentes_contratados_ref = 71 if mes_sel == 11 else (74 if mes_sel == 10 else 71)
   agentes_contratados_input = st.sidebar.number_input(
       "Agentes Contratados (Base)",
       min_value=1,
       max_value=200,
       value=agentes_contratados_ref,
+  )
+
+  ausentismo_teorico_input = (
+      st.sidebar.number_input(
+          "% Ausentismo Esperado (Contratados)",
+          min_value=0.0,
+          max_value=30.0,
+          value=4.0,
+          step=0.5,
+      )
+      / 100.0
   )
 
   if "asesor" in [str(c).lower() for c in df_ventas.columns]:
@@ -938,7 +949,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     else:
       format_dict[c] = "{:.0f}"
 
-  # PALETAS DE COLORES SOBRIAS Y EQUILIBRADAS (RGB)
+  # PALETAS DE COLORES SOBRIAS (RGB)
   rgb_green = (162, 217, 163)  # Verde suave (#a2d9a3)
   rgb_orange = (254, 210, 120)  # Naranja intermedio suave (#fed278)
   rgb_red = (248, 140, 140)  # Rojo suave (#f88c8c)
@@ -1064,14 +1075,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 
   # =========================================================================
-  # 🚀 NUEVA SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS
+  # 🚀 SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS (AJUSTADO)
   # =========================================================================
   st.divider()
   st.subheader("🎯 Análisis Comparativo de Capacidad y Desviación de Leads")
   st.caption(
-      "Evaluación diaria de Meta LE basada en Agentes Contratados ("
-      f"Base: {agentes_contratados_input}), Programados y Logueados con"
-      " diagnóstico de causalidad de impacto."
+      f"Evaluación diaria de Meta LE basada en Agentes Contratados ({agentes_contratados_input} menos "
+      f"{ausentismo_teorico_input:.1%} ausentismo teórico = {agentes_contratados_input * (1 - ausentismo_teorico_input):.2f} netos). "
+      "La Meta Asesor de Sábados se calcula a la mitad (4.1 / 2)."
   )
 
   df_cap = df_final.copy()
@@ -1080,13 +1091,33 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   df_cap["Agentes Log"] = df_cap["Agentes Log"]
   df_cap["Ausencias Día"] = df_cap["Agentes Programados"] - df_cap["Agentes Log"]
 
+  # Personal Neto Contratado (-4% o según slider)
+  agentes_netos_contratados = agentes_contratados_input * (
+      1.0 - ausentismo_teorico_input
+  )
+
+  # Función para determinar la Meta Asesor según el día (Semana vs Sábado)
+  def obtener_meta_asesor_dia(row):
+    es_sabado = "sáb" in str(row["Día"]).lower()
+    base = (
+        row["Meta Asesor"]
+        if ("Meta Asesor" in row and row["Meta Asesor"] > 0)
+        else 4.1
+    )
+    return (base / 2.0) if es_sabado else base
+
+  df_cap["Meta_Asesor_Dia"] = df_cap.apply(obtener_meta_asesor_dia, axis=1)
+
+  # RE-CÁLCULO EXACTO SOLICITADO PARA LEADS EFECTIVOS Y CAPACIDADES
   df_cap["Meta LE Contratados"] = (
-      df_cap["Agentes Contratados"] * df_cap["Meta Asesor"]
+      agentes_netos_contratados * df_cap["Meta_Asesor_Dia"]
   )
   df_cap["Meta LE Programados"] = (
-      df_cap["Agentes Programados"] * df_cap["Meta Asesor"]
+      df_cap["Agentes Programados"] * df_cap["Meta_Asesor_Dia"]
   )
-  df_cap["Meta LE Logueados"] = df_cap["Agentes Log"] * df_cap["Meta Asesor"]
+  df_cap["Meta LE Logueados"] = (
+      df_cap["Agentes Log"] * df_cap["Meta_Asesor_Dia"]
+  )
   df_cap["Leads Realizados"] = df_cap["Lead Efectivo"]
 
   df_cap["Desv vs Contratados"] = (
@@ -1098,7 +1129,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
   # Impactos cuantitativos de desviación (leads)
   df_cap["Impacto Ausentismo"] = (
-      -1 * df_cap["Ausencias Día"] * df_cap["Meta Asesor"]
+      -1 * df_cap["Ausencias Día"] * df_cap["Meta_Asesor_Dia"]
   )
   df_cap["Impacto Productividad SPH"] = (
       df_cap["Leads Realizados"] - df_cap["Meta LE Logueados"]
@@ -1138,6 +1169,10 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       if tot_cap["Agentes Log"] > 0
       else 0
   )
+  tot_cap["Meta LE Contratados"] = df_cap["Meta LE Contratados"].sum()
+  tot_cap["Meta LE Programados"] = df_cap["Meta LE Programados"].sum()
+  tot_cap["Meta LE Logueados"] = df_cap["Meta LE Logueados"].sum()
+  tot_cap["Leads Realizados"] = df_cap["Leads Realizados"].sum()
   tot_cap["Desv vs Contratados"] = (
       tot_cap["Leads Realizados"] - tot_cap["Meta LE Contratados"]
   )
@@ -1204,7 +1239,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     imp_aus = row_d["Impacto Ausentismo"]
     imp_sph = row_d["Impacto Productividad SPH"]
     sph_real = row_d["SPH"]
-    meta_as = row_d["Meta Asesor"]
+    meta_as = row_d["Meta_Asesor_Dia"]
 
     badge_cont = (
         f'<span class="arrow-badge-up">⬆️ Superávit (+{int(desv_cont):,} LE)</span>'
@@ -1222,7 +1257,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         <div class="diag-box">
             <div class="diag-header">📌 Informe de Causalidad — {dia_sel_diag.upper()}</div>
             <div style="margin-bottom:12px;">
-                <div style="font-size:12px; color:#64748b; font-weight:700;">VS CONTRATADOS ({agentes_contratados_input}):</div>
+                <div style="font-size:12px; color:#64748b; font-weight:700;">VS CONTRATADOS ({agentes_contratados_input} Base / {agentes_netos_contratados:.1f} Netos):</div>
                 <div style="margin-top:2px;">{badge_cont}</div>
             </div>
             <div style="margin-bottom:14px;">
@@ -1232,15 +1267,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
             <div style="border-top: 1px dashed #cbd5e1; padding-top:10px;">
                 <div style="font-size:13px; font-weight:800; color:#0f172a; margin-bottom:6px;">Explicación de la Desviación:</div>
                 <div class="causal-item">
-                    • <b>Capacidad / Ausentismo:</b> {int(row_d['Ausencias Día'])} ausencias registradas significan un impacto de 
-                    <b style="color:{'#b91c1c' if imp_aus < 0 else '#15803d'}">{int(imp_aus):+,.0f} LE</b> sobre la meta inicial.
+                    • <b>Ausentismo Operativo:</b> {int(row_d['Ausencias Día'])} ausencias en piso equivalen a 
+                    <b style="color:{'#b91c1c' if imp_aus < 0 else '#15803d'}">{int(imp_aus):+,.0f} LE</b> de impacto directo.
                 </div>
                 <div class="causal-item">
-                    • <b>Eficiencia Productiva (SPH):</b> Rendimiento real de <b>{sph_real:.1f} LE/Agente</b> vs Meta implícita de <b>{meta_as:.1f} LE/Agente</b>, aportando 
-                    <b style="color:{'#15803d' if imp_sph >= 0 else '#b91c1c'}">{int(imp_sph):+,.0f} LE</b> de desviación por desempeño.
+                    • <b>Eficiencia Productiva (SPH):</b> Desempeño real de <b>{sph_real:.1f} LE/Agente</b> vs Meta del día de <b>{meta_as:.1f} LE/Agente</b>, aportando 
+                    <b style="color:{'#15803d' if imp_sph >= 0 else '#b91c1c'}">{int(imp_sph):+,.0f} LE</b> de desviación por productividad.
                 </div>
                 <div style="background-color:#f8fafc; padding:8px 10px; border-radius:6px; margin-top:8px; font-size:12px; color:#475569; border-left:3px solid #0284c7;">
-                    <b>Conclusión:</b> {'El superávit fue impulsado principalmente por la alta productividad individual (SPH) que superó el ausentismo.' if imp_sph > abs(imp_aus) and desv_cont >= 0 else ('El déficit responde principalmente a la falta de personal logueado en piso.' if abs(imp_aus) > abs(imp_sph) and desv_cont < 0 else 'El resultado refleja un bajo rendimiento promedio en las horas trabajadas por los agentes logueados.')}
+                    <b>Conclusión:</b> {'El superávit fue impulsado por una alta productividad individual (SPH) que compensó el ausentismo.' if imp_sph > abs(imp_aus) and desv_cont >= 0 else ('El déficit responde principalmente al faltante de personal logueado en piso.' if abs(imp_aus) > abs(imp_sph) and desv_cont < 0 else 'El resultado refleja la diferencia en la tasa de conversión por hora de los asesores activos.')}
                 </div>
             </div>
         </div>
