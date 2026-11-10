@@ -521,23 +521,22 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       .rename(columns={"F_VTA": "Fecha"})
   )
 
-  # AGRUPACIÓN APROBACIONES (REGLA EXACTA AP MES Y COSECHA)
-  inicio_mes_sel = date(año_sel, mes_sel, 1)
-
+  # AGRUPACIÓN APROBACIONES:
+  # 1) AP MES: Agrupadas por F_VTA (Día de la Venta del Mes) para dejar cada venta en su día original (e.g. 4 el día 2, 3 el día 4)
   df_ap_mes = df_ventas[
-      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
-      & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel)
-      & (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
+      (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
       & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
       & (df_ventas["DECISION"] == "A")
   ]
   agrup_ap_mes = (
-      df_ap_mes.groupby("F_DEC_EFF")
+      df_ap_mes.groupby("F_VTA")
       .size()
       .reset_index(name="AP MES")
-      .rename(columns={"F_DEC_EFF": "Fecha"})
+      .rename(columns={"F_VTA": "Fecha"})
   )
 
+  # 2) AP COSECHA: Agrupadas por F_DEC_EFF (Día de Decisión en el mes en curso para ventas de meses anteriores)
+  inicio_mes_sel = date(año_sel, mes_sel, 1)
   df_ap_cos = df_ventas[
       (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel)
       & (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel)
@@ -614,6 +613,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       0,
   )
 
+  # CÁLCULOS ACUMULADOS DE CONVERSIÓN A LA FECHA
   df_final["% Aprob Acum Mes"] = np.where(
       df_final["Lead Efectivo"].cumsum() > 0,
       df_final["AP MES"].cumsum() / df_final["Lead Efectivo"].cumsum(),
@@ -1595,9 +1595,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   st.subheader("📉 Tendencia AP (% Aprobación Acumulada — ÚLTIMOS 4 MESES)")
   st.caption(
       "Seguimiento acumulado diario de la tasa de aprobación (% AP) para los"
-      " últimos 4 meses. Para meses anteriores se utiliza (AP Mes + Cosecha) /"
-      " Leads Efectivos; para el mes en curso se utiliza AP Mes / Leads"
-      " Efectivos."
+      " últimos 4 meses, calculado como el total de aprobaciones a la fecha"
+      " divididas entre el volumen de Leads Efectivos acumulados."
   )
 
   # Determinación dinámica de los últimos 4 meses
@@ -1610,7 +1609,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       y -= 1
     meses_tendencia.append((y, m))
 
-  def calcular_tendencia_mes(y, m, es_mes_actual, df_v):
+  def calcular_tendencia_mes(y, m, df_v):
     num_dias_m = calendar.monthrange(y, m)[1]
     inicio_m = date(y, m, 1)
 
@@ -1625,7 +1624,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     )
     df_dec_m = df_v[dec_m_mask]
 
-    if es_mes_actual and not df_dec_m.empty:
+    es_mes_actual_flag = (y == año_sel) and (m == mes_sel)
+
+    if es_mes_actual_flag and not df_dec_m.empty:
       max_d = pd.to_datetime(
           df_dec_m["F_DEC"].fillna(df_dec_m["F_VTA"])
       ).dt.day.max()
@@ -1661,10 +1662,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       )
       ap_cos_acum = ap_cos_mask.sum()
 
-      if es_mes_actual:
-        ap_total_acum = ap_mes_acum
-      else:
-        ap_total_acum = ap_mes_acum + ap_cos_acum
+      # Cálculo Acumulado Total AP (AP MES + AP COSECHA a la fecha de corte)
+      ap_total_acum = ap_mes_acum + ap_cos_acum
 
       pct = (ap_total_acum / total_leads * 100.0) if total_leads > 0 else 0.0
       dias.append(d)
@@ -1676,8 +1675,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   colores_meses = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
 
   for idx, (y_m, m_m) in enumerate(meses_tendencia):
-    es_actual = y_m == año_sel and m_m == mes_sel
-    dias_m, pcts_m = calcular_tendencia_mes(y_m, m_m, es_actual, df_ventas)
+    dias_m, pcts_m = calcular_tendencia_mes(y_m, m_m, df_ventas)
 
     nombre_m = nombres_meses.get(m_m, str(m_m)).lower()
     color_m = colores_meses[idx % len(colores_meses)]
