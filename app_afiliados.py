@@ -5,6 +5,8 @@ import re
 import holidays
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
@@ -1254,10 +1256,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         else f'<span class="arrow-badge-down">⬇️ Déficit ({int(desv_log):,} LE)</span>'
     )
 
-    # ---------------------------------------------------------------------
-    # CÁLCULOS COMPARATIVOS AVANZADOS (DÍA ANTERIOR & DÍA DE LA SEMANA)
-    # ---------------------------------------------------------------------
-    # 1. Comparación con Día Anterior
+    # CÁLCULOS COMPARATIVOS AVANZADOS
     if idx_curr > 0:
       row_prev = df_cap.iloc[idx_curr - 1]
       dia_prev_nombre = row_prev["Día"]
@@ -1290,7 +1289,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
           "• <b>vs Día Anterior:</b> Primer día registrado del periodo en evaluación."
       )
 
-    # 2. Comparación con Mismos Días de la Semana Anteriores (Histórico del mismo día)
     dow_curr = (
         row_d["Día_Semana"]
         if "Día_Semana" in row_d
@@ -1337,7 +1335,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
           f"• <b>vs Promedio de {nombre_dow}s Anteriores:</b> Corresponde al primer {nombre_dow} del mes."
       )
 
-    # Texto de conclusión base según causales
     if imp_sph > abs(imp_aus) and desv_cont >= 0:
       concl_base = "El superávit fue impulsado principalmente por una alta productividad individual (SPH) que compensó holgadamente el ausentismo."
     elif abs(imp_aus) > abs(imp_sph) and desv_cont < 0:
@@ -1368,7 +1365,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
                     <b style="color:{'#15803d' if imp_sph >= 0 else '#b91c1c'}">{int(imp_sph):+,.0f} LE</b> de desviación por productividad.
                 </div>
                 <div style="background-color:#f8fafc; padding:10px 12px; border-radius:6px; margin-top:10px; font-size:12px; color:#334155; border-left:4px solid #0284c7;">
-                    <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">📌 Conclusión & Análises de Tendencia:</div>
+                    <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">📌 Conclusión & Análisis de Tendencia:</div>
                     <div style="margin-bottom:6px;">{concl_base}</div>
                     <div style="border-top:1px solid #e2e8f0; padding-top:6px; font-size:11.5px; line-height:1.4;">
                         <div style="margin-bottom:4px;">{comp_ayer_html}</div>
@@ -1380,5 +1377,214 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         """,
         unsafe_allow_html=True,
     )
+
+  # =========================================================================
+  # 📈 NUEVA SECCIÓN: GRÁFICO EJECUTIVO DE SEGUIMIENTO LE REAL VS PTO Y GAP
+  # =========================================================================
+  st.divider()
+  st.subheader("📈 Seguimiento Visual LE Real vs. Pto Diario y GAP Acumulado")
+  st.caption(
+      "Representación gráfica interactiva y estilizada de los Leads Efectivos"
+      " realizados frente a la Meta diaria y el seguimiento acumulado del GAP."
+  )
+
+  df_chart = df_cap.copy()
+  df_chart["Diferencia Neta Acumulada"] = (
+      df_chart["Leads Realizados"] - df_chart["Meta LE Contratados"]
+  ).cumsum()
+
+  tab_combo, tab_barras3 = st.tabs([
+      "📊 Gráfico Combinado Ejecutivo (Barras + Línea)",
+      "📊 Gráfico de 3 Barras (Estilo Excel)",
+  ])
+
+  # TAB 1: GRÁFICO COMBINADO EJECUTIVO (BARRAS META & REAL + LÍNEA GAP ACUMULADO)
+  with tab_combo:
+    fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # Barras Meta PTTO
+    fig_combo.add_trace(
+        go.Bar(
+            x=df_chart["Día"],
+            y=df_chart["Meta LE Contratados"],
+            name="LEADS EFECTIVOS PTTO",
+            marker_color="#ea580c",  # Naranja corporativo elegante
+            text=df_chart["Meta LE Contratados"].astype(int),
+            textposition="outside",
+            textfont=dict(size=11, color="#1e293b", family="sans-serif"),
+            hovertemplate="<b>%{x}</b><br>Meta PTTO: <b>%{y:,.0f} LE</b><extra></extra>",
+        ),
+        secondary_y=False,
+    )
+
+    # Barras Realizado
+    fig_combo.add_trace(
+        go.Bar(
+            x=df_chart["Día"],
+            y=df_chart["Leads Realizados"],
+            name="LEADS EFECTIVOS REAL",
+            marker_color="#0284c7",  # Azul corporativo brillante
+            text=df_chart["Leads Realizados"].astype(int),
+            textposition="outside",
+            textfont=dict(size=11, color="#1e293b", family="sans-serif"),
+            hovertemplate="<b>%{x}</b><br>Realizado: <b>%{y:,.0f} LE</b><extra></extra>",
+        ),
+        secondary_y=False,
+    )
+
+    # Línea GAP Acumulado en Eje Secundario
+    fig_combo.add_trace(
+        go.Scatter(
+            x=df_chart["Día"],
+            y=df_chart["Diferencia Neta Acumulada"],
+            name="DIFERENCIA NETA ACUMULADA",
+            mode="lines+markers+text",
+            line=dict(color="#15803d", width=3, dash="solid"),
+            marker=dict(size=8, color="#15803d", symbol="circle"),
+            text=df_chart["Diferencia Neta Acumulada"].astype(int),
+            textposition="bottom center",
+            textfont=dict(size=11, color="#166534"),
+            hovertemplate="<b>%{x}</b><br>Diferencia Acumulada: <b>%{y:,.0f} LE</b><extra></extra>",
+        ),
+        secondary_y=True,
+    )
+
+    fig_combo.update_layout(
+        title=dict(
+            text="<b>Seguimiento LE Real Vs Pto Diario & Diferencia Acumulada</b>",
+            font=dict(size=16, color="#0f172a"),
+        ),
+        barmode="group",
+        bargap=0.2,
+        bargroupgap=0.08,
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        height=480,
+        margin=dict(l=20, r=20, t=60, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#cbd5e1",
+            borderwidth=1,
+        ),
+        hovermode="x unified",
+    )
+
+    fig_combo.update_xaxes(
+        showgrid=True,
+        gridcolor="#f1f5f9",
+        tickfont=dict(size=12, color="#334155"),
+    )
+    fig_combo.update_yaxes(
+        title_text="Volumen de Leads Diarios",
+        showgrid=True,
+        gridcolor="#e2e8f0",
+        zeroline=True,
+        zerolinecolor="#94a3b8",
+        tickfont=dict(size=11, color="#475569"),
+        secondary_y=False,
+    )
+    fig_combo.update_yaxes(
+        title_text="Diferencia Acumulada (GAP)",
+        showgrid=False,
+        zeroline=True,
+        zerolinecolor="#ef4444",
+        tickfont=dict(size=11, color="#166534"),
+        secondary_y=True,
+    )
+
+    st.plotly_chart(fig_combo, use_container_width=True)
+
+  # TAB 2: GRÁFICO DE 3 BARRAS IGUAL AL DE EXCEL (METRICAS EN 3 BARRAS AGRUPADAS)
+  with tab_barras3:
+    fig_barras3 = go.Figure()
+
+    # Bar 1: PTTO
+    fig_barras3.add_trace(
+        go.Bar(
+            x=df_chart["Día"],
+            y=df_chart["Meta LE Contratados"],
+            name="LEADS EFECTIVOS PTTO",
+            marker_color="#ea580c",
+            text=df_chart["Meta LE Contratados"].astype(int),
+            textposition="auto",
+            textfont=dict(size=11, color="#ffffff"),
+            hovertemplate="<b>%{x}</b><br>Meta PTTO: <b>%{y:,.0f} LE</b><extra></extra>",
+        )
+    )
+
+    # Bar 2: REAL
+    fig_barras3.add_trace(
+        go.Bar(
+            x=df_chart["Día"],
+            y=df_chart["Leads Realizados"],
+            name="LEADS EFECTIVOS REAL",
+            marker_color="#0284c7",
+            text=df_chart["Leads Realizados"].astype(int),
+            textposition="auto",
+            textfont=dict(size=11, color="#ffffff"),
+            hovertemplate="<b>%{x}</b><br>Realizado: <b>%{y:,.0f} LE</b><extra></extra>",
+        )
+    )
+
+    # Bar 3: DIFERENCIA NETA ACUMULADA
+    fig_barras3.add_trace(
+        go.Bar(
+            x=df_chart["Día"],
+            y=df_chart["Diferencia Neta Acumulada"],
+            name="DIFERENCIA NETA ACUMULADA",
+            marker_color="#15803d",
+            text=df_chart["Diferencia Neta Acumulada"].astype(int),
+            textposition="auto",
+            textfont=dict(size=11, color="#ffffff"),
+            hovertemplate="<b>%{x}</b><br>Diferencia Acumulada: <b>%{y:,.0f} LE</b><extra></extra>",
+        )
+    )
+
+    fig_barras3.update_layout(
+        title=dict(
+            text="<b>Seguimiento LE Real Vs Pto Diario (Formato Tríptico de Barras)</b>",
+            font=dict(size=16, color="#0f172a"),
+        ),
+        barmode="group",
+        bargap=0.18,
+        bargroupgap=0.05,
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        height=500,
+        margin=dict(l=20, r=20, t=60, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#cbd5e1",
+            borderwidth=1,
+        ),
+        hovermode="x unified",
+    )
+
+    fig_barras3.update_xaxes(
+        showgrid=True,
+        gridcolor="#f1f5f9",
+        tickfont=dict(size=12, color="#334155"),
+    )
+    fig_barras3.update_yaxes(
+        showgrid=True,
+        gridcolor="#e2e8f0",
+        zeroline=True,
+        zerolinecolor="#475569",
+        zerolinewidth=1.5,
+        tickfont=dict(size=11, color="#475569"),
+    )
+
+    st.plotly_chart(fig_barras3, use_container_width=True)
+
 else:
   st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
