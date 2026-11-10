@@ -26,13 +26,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_ventas['ESTADO'] = df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
     df_ventas['DECISION'] = df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
     
-    # Fecha Decisión explícita en AX (49)
     if len(df_ventas.columns) > 49:
         df_ventas['F_DEC'] = pd.to_datetime(df_ventas.iloc[:, 49], errors='coerce').dt.date
     else:
         df_ventas['F_DEC'] = pd.NaT
 
-    # Filtros laterales
     fechas_validas = pd.Series(df_ventas['F_VTA']).dropna()
     años_disp = sorted(pd.to_datetime(fechas_validas).dt.year.unique()) if not fechas_validas.empty else [date.today().year]
     año_sel = st.sidebar.selectbox("Año", años_disp, index=len(años_disp)-1)
@@ -50,7 +48,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if asesor_sel != "Todos":
             df_ventas = df_ventas[df_ventas[col_as] == asesor_sel]
 
-    # --- FUNCIÓN DEFINITIVA Y A PRUEBA DE FALLOS PARA FECHAS SUCIAS ---
     def parse_fecha_sucia(serie, año):
         def extract_date(val):
             if pd.isna(val) or val == '' or val == 'nan': return pd.NaT
@@ -76,7 +73,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_cal['Es_Festivo'] = pd.to_datetime(df_cal['Fecha']).apply(lambda x: x in festivos_mx)
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
-    # --- PREPARACIÓN HOJAS AUXILIARES ---
+    # --- HOJAS AUXILIARES ---
     if not df_planta.empty and len(df_planta.columns) > 2:
         df_planta['Fecha'] = pd.to_datetime(df_planta.iloc[:, 0], errors='coerce').dt.date
         df_planta['Agentes Plantilla'] = pd.to_numeric(df_planta.iloc[:, 1], errors='coerce').fillna(0)
@@ -91,11 +88,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
 
     if not df_malla.empty and len(df_malla.columns) > 65:
         df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13], año_sel)
-        # Extraer "Tiempo Real" de la columna BN (índice 65), ignorando errores (#¡VALOR!)
         df_malla['Tiempo Real'] = pd.to_numeric(df_malla.iloc[:, 65], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_malla.groupby('Fecha').agg({'Tiempo Real':'sum'}).reset_index(), on='Fecha', how='left')
-    else:
-        st.warning("⚠️ La hoja 'Malla Día' no tiene suficientes columnas para calcular SPH (necesita hasta la BN).")
 
     for col in ['Agentes Plantilla', 'Agentes Log', 'Meta Día Lead Efectivo', 'Meta Asesor', 'Tiempo Real']:
         if col not in df_cal.columns: df_cal[col] = 0
@@ -117,17 +111,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     })).reset_index().rename(columns={'F_VTA': 'Fecha'})
 
     # --- AGRUPACIÓN 2: APROBACIONES DIARIAS (POR FECHA DE DECISIÓN) ---
-    # Solo consideramos registros con Decisión 'A' y Fecha de Decisión del mes/año seleccionado
+    # AP MES: Decisión 'A', Fecha Decisión en el día, y Fecha Venta (columna E) en el mes en curso.
     df_ventas_dec = df_ventas[(pd.to_datetime(df_ventas['F_DEC']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_DEC']).dt.month == mes_sel) & (df_ventas['DECISION'] == 'A')]
     
     agrup_dec = df_ventas_dec.groupby('F_DEC').apply(lambda x: pd.Series({
-        # AP MES: Fecha de Venta es del mes seleccionado
         'AP MES': (pd.to_datetime(x['F_VTA']).dt.month == mes_sel).sum(),
-        # AP COSECHA: Fecha de Venta es de meses anteriores
         'AP COSECHA': (pd.to_datetime(x['F_VTA']).dt.month != mes_sel).sum()
     })).reset_index().rename(columns={'F_DEC': 'Fecha'})
 
-    # --- CRUCE FINAL Y CÁLCULOS GERENCIALES ---
+    # --- CRUCE FINAL Y CÁLCULOS ---
     df_final = pd.merge(df_cal, agrup_vta, on="Fecha", how="left").fillna(0)
     df_final = pd.merge(df_final, agrup_dec, on="Fecha", how="left").fillna(0)
     
@@ -138,7 +130,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_final['Meta Lead Efectivos Log'] = df_final['Meta Asesor'] * df_final['Agentes Log']
     df_final['Diferencia LE'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Log']
     
-    # GAP LE: (Leads Efectivos Acumulados) - (Meta Acumulada) hasta el día actual
+    # GAP LE negativo acumulado hasta ayer
     df_final['GAP LE'] = 0.0
     mask_pasado = df_final['Fecha'] < date.today()
     df_final.loc[mask_pasado, 'GAP LE'] = df_final.loc[mask_pasado, 'Lead Efectivo'].cumsum() - df_final.loc[mask_pasado, 'Meta Día Lead Efectivo'].cumsum()
@@ -147,15 +139,10 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_final['% REM/RECH'] = np.where(df_final['Tramites'] > 0, df_final['Otros'] / df_final['Tramites'], 0)
     df_final['Prom'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Agentes Log'] / df_final['Lead Efectivo'], 0)
     df_final['% Ausentismo'] = np.where(df_final['Agentes Plantilla'] > 0, (df_final['Agentes Plantilla'] - df_final['Agentes Log']) / df_final['Agentes Plantilla'], 0)
-    
-    # SPH = Lead Efectivo / Tiempo Real (ignorando ceros para evitar divisón por cero)
     df_final['SPH'] = np.where(df_final['Tiempo Real'] > 0, df_final['Lead Efectivo'] / df_final['Tiempo Real'], 0)
     
-    # Cálculos AP Diarios
     df_final['AP Totales'] = df_final['AP MES'] + df_final['AP COSECHA']
     df_final['% AP dia'] = np.where(df_final['Lead Efectivo'] > 0, df_final['AP Totales'] / df_final['Lead Efectivo'], 0)
-    
-    # Cálculo AP Acumulado: (Suma de AP Totales hasta el día) / (Suma de Leads Efectivos hasta el día)
     df_final['AP Acum'] = np.where(df_final['Lead Efectivo'].cumsum() > 0, df_final['AP Totales'].cumsum() / df_final['Lead Efectivo'].cumsum(), 0)
     
     df_final['% EVALUADO'] = np.where(df_final['Lead Efectivo'] > 0, df_final['EVALUADO'] / df_final['Lead Efectivo'], 0)
@@ -181,9 +168,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     totales['% Ausentismo'] = (totales['Agentes Plantilla'] - totales['Agentes Log']) / totales['Agentes Plantilla'] if totales.get('Agentes Plantilla', 0) > 0 else 0
     totales['SPH'] = totales['Lead Efectivo'] / totales.get('Tiempo Real', 1) if totales.get('Tiempo Real', 0) > 0 else 0
     totales['% AP dia'] = totales['AP Totales'] / totales['Lead Efectivo'] if totales.get('Lead Efectivo', 0) > 0 else 0
-    totales['AP Acum'] = totales['% AP dia'] # En la fila de total, el acumulado es igual al % general del mes
+    totales['AP Acum'] = totales['% AP dia']
     
-    # GAP Total es el último valor calculado que no sea 0
     df_gap_valido = df_final[df_final['GAP LE'] != 0]
     totales['GAP LE'] = df_gap_valido['GAP LE'].iloc[-1] if not df_gap_valido.empty else 0
     
@@ -193,7 +179,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     # --- KPIS SUPERIORES ---
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
-    # Buscar el último día con aprobaciones
     df_aprob = df_final[df_final['AP Totales'] > 0]
     if not df_aprob.empty:
         ultimo_dia_ap = pd.to_datetime(df_aprob['Fecha'].max()).strftime('%d-%b').lower()
