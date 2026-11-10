@@ -50,7 +50,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if asesor_sel != "Todos":
             df_ventas = df_ventas[df_ventas[col_as] == asesor_sel]
 
-    # --- FUNCIÓN DEFINITIVA Y A PRUEBA DE FALLOS PARA FECHAS SUCIAS (ej: "mié-21-oct") ---
+    # --- FUNCIÓN DEFINITIVA Y A PRUEBA DE FALLOS PARA FECHAS SUCIAS ---
     def parse_fecha_sucia(serie, año):
         def extract_date(val):
             if pd.isna(val) or val == '' or val == 'nan': return pd.NaT
@@ -89,18 +89,19 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         df_ppto['Meta Asesor'] = pd.to_numeric(df_ppto.iloc[:, 37], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_ppto.groupby('Fecha').agg({'Meta Día Lead Efectivo':'max', 'Meta Asesor':'max'}).reset_index(), on='Fecha', how='left')
 
-    if not df_malla.empty and len(df_malla.columns) > 13:
+    if not df_malla.empty and len(df_malla.columns) > 65:
         df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13], año_sel)
-        col_tr_idx = next((i for i, c in enumerate(df_malla.columns) if 'tiempo' in str(c).lower()), -1)
-        if col_tr_idx != -1:
-            df_malla['Tiempo Real'] = pd.to_numeric(df_malla.iloc[:, col_tr_idx], errors='coerce').fillna(0)
-            df_cal = pd.merge(df_cal, df_malla.groupby('Fecha').agg({'Tiempo Real':'sum'}).reset_index(), on='Fecha', how='left')
+        # Extraer "Tiempo Real" de la columna BN (índice 65), ignorando errores (#¡VALOR!)
+        df_malla['Tiempo Real'] = pd.to_numeric(df_malla.iloc[:, 65], errors='coerce').fillna(0)
+        df_cal = pd.merge(df_cal, df_malla.groupby('Fecha').agg({'Tiempo Real':'sum'}).reset_index(), on='Fecha', how='left')
+    else:
+        st.warning("⚠️ La hoja 'Malla Día' no tiene suficientes columnas para calcular SPH (necesita hasta la BN).")
 
     for col in ['Agentes Plantilla', 'Agentes Log', 'Meta Día Lead Efectivo', 'Meta Asesor', 'Tiempo Real']:
         if col not in df_cal.columns: df_cal[col] = 0
     df_cal = df_cal.fillna(0)
 
-    # --- AGRUPACIÓN 1: POR FECHA DE VENTA ---
+    # --- AGRUPACIÓN 1: TRÁMITES (POR FECHA DE VENTA) ---
     df_ventas_vta = df_ventas[(pd.to_datetime(df_ventas['F_VTA']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_VTA']).dt.month == mes_sel)]
     agrup_vta = df_ventas_vta.groupby('F_VTA').apply(lambda x: pd.Series({
         'Tramites': len(x),
@@ -115,12 +116,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         'Pendiente': (x['DECISION'] == 'P').sum()
     })).reset_index().rename(columns={'F_VTA': 'Fecha'})
 
-    # --- AGRUPACIÓN 2: POR FECHA DE DECISIÓN (AP COSECHA VS AP MES) ESTRICTAMENTE DIARIO ---
+    # --- AGRUPACIÓN 2: APROBACIONES DIARIAS (POR FECHA DE DECISIÓN) ---
+    # Solo consideramos registros con Decisión 'A' y Fecha de Decisión del mes/año seleccionado
     df_ventas_dec = df_ventas[(pd.to_datetime(df_ventas['F_DEC']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_DEC']).dt.month == mes_sel) & (df_ventas['DECISION'] == 'A')]
+    
     agrup_dec = df_ventas_dec.groupby('F_DEC').apply(lambda x: pd.Series({
-        # Si la venta fue en el mismo mes seleccionado
+        # AP MES: Fecha de Venta es del mes seleccionado
         'AP MES': (pd.to_datetime(x['F_VTA']).dt.month == mes_sel).sum(),
-        # Si la venta fue en un mes distinto al mes seleccionado
+        # AP COSECHA: Fecha de Venta es de meses anteriores
         'AP COSECHA': (pd.to_datetime(x['F_VTA']).dt.month != mes_sel).sum()
     })).reset_index().rename(columns={'F_DEC': 'Fecha'})
 
@@ -135,7 +138,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_final['Meta Lead Efectivos Log'] = df_final['Meta Asesor'] * df_final['Agentes Log']
     df_final['Diferencia LE'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Log']
     
-    # GAP LE: (Suma de Leads Efectivos hasta ayer) - (Suma de Meta hasta ayer). Esto arrojará números negativos si estás por debajo.
+    # GAP LE: (Leads Efectivos Acumulados) - (Meta Acumulada) hasta el día actual
     df_final['GAP LE'] = 0.0
     mask_pasado = df_final['Fecha'] < date.today()
     df_final.loc[mask_pasado, 'GAP LE'] = df_final.loc[mask_pasado, 'Lead Efectivo'].cumsum() - df_final.loc[mask_pasado, 'Meta Día Lead Efectivo'].cumsum()
@@ -144,6 +147,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_final['% REM/RECH'] = np.where(df_final['Tramites'] > 0, df_final['Otros'] / df_final['Tramites'], 0)
     df_final['Prom'] = np.where(df_final['Lead Efectivo'] > 0, df_final['Agentes Log'] / df_final['Lead Efectivo'], 0)
     df_final['% Ausentismo'] = np.where(df_final['Agentes Plantilla'] > 0, (df_final['Agentes Plantilla'] - df_final['Agentes Log']) / df_final['Agentes Plantilla'], 0)
+    
+    # SPH = Lead Efectivo / Tiempo Real (ignorando ceros para evitar divisón por cero)
     df_final['SPH'] = np.where(df_final['Tiempo Real'] > 0, df_final['Lead Efectivo'] / df_final['Tiempo Real'], 0)
     
     # Cálculos AP Diarios
@@ -188,11 +193,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     # --- KPIS SUPERIORES ---
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
-    # KPI % AP Acumulado del último día de aprobación
+    # Buscar el último día con aprobaciones
     df_aprob = df_final[df_final['AP Totales'] > 0]
     if not df_aprob.empty:
         ultimo_dia_ap = pd.to_datetime(df_aprob['Fecha'].max()).strftime('%d-%b').lower()
-        pct_ap_acum_ultimo = df_aprob.iloc[-1]['AP Acum'] # Extrae el % Acumulado hasta ese día específico
+        pct_ap_acum_ultimo = df_aprob.iloc[-1]['AP Acum']
     else:
         ultimo_dia_ap = "N/A"
         pct_ap_acum_ultimo = 0
@@ -200,7 +205,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Trámites Totales", f"{int(totales['Tramites'])}")
     col2.metric("Leads Efectivos", f"{int(totales['Lead Efectivo'])}")
-    col3.metric("GAP LE Acumulado", f"{int(totales['GAP LE'])}") # Ahora mostrará valores negativos
+    col3.metric("GAP LE Acumulado", f"{int(totales['GAP LE'])}")
     col4.metric(f"Últ. Aprobación ({ultimo_dia_ap})", f"{pct_ap_acum_ultimo:.1%}")
     
     st.write("")
