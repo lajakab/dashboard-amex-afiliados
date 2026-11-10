@@ -4,6 +4,7 @@ import numpy as np
 import holidays
 from datetime import date
 import calendar
+import re
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
@@ -25,13 +26,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_ventas['ESTADO'] = df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
     df_ventas['DECISION'] = df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
     
-    # Fecha Decisión explícita en AX (49)
     if len(df_ventas.columns) > 49:
         df_ventas['F_DEC'] = pd.to_datetime(df_ventas.iloc[:, 49], errors='coerce').dt.date
     else:
         df_ventas['F_DEC'] = pd.NaT
 
-    # Filtros laterales
     fechas_validas = pd.Series(df_ventas['F_VTA']).dropna()
     años_disp = sorted(pd.to_datetime(fechas_validas).dt.year.unique()) if not fechas_validas.empty else [date.today().year]
     año_sel = st.sidebar.selectbox("Año", años_disp, index=len(años_disp)-1)
@@ -49,16 +48,16 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if asesor_sel != "Todos":
             df_ventas = df_ventas[df_ventas[col_as] == asesor_sel]
 
-    # --- FUNCIÓN VECTORIZADA ANTI-ERRORES PARA FECHAS SUCIAS ---
+    # --- FUNCIÓN CORREGIDA (Solo para la columna AJ de Seg PPTO) ---
     def parse_fecha_sucia(serie, año):
         s = serie.astype(str).str.lower().str.strip()
         meses_esp = {'ene':'jan', 'feb':'feb', 'mar':'mar', 'abr':'apr', 'may':'may', 'jun':'jun', 'jul':'jul', 'ago':'aug', 'sep':'sep', 'oct':'oct', 'nov':'nov', 'dic':'dec'}
         for esp, eng in meses_esp.items():
             s = s.str.replace(esp, eng, regex=False)
         
-        # Extrae el patrón 20-oct de manera segura
         extraido = s.str.extract(r'(\d{1,2}-[a-z]{3})')[0]
-        s_final = np.where(extraido.notna(), extraido + f"-{año}", s)
+        # Envolvemos en pd.Series para evitar el AttributeError
+        s_final = pd.Series(np.where(extraido.notna(), extraido + f"-{año}", s), index=serie.index)
         return pd.to_datetime(s_final, errors='coerce').dt.date
 
     # --- CALENDARIO BASE ---
@@ -77,13 +76,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         df_cal = pd.merge(df_cal, df_planta.groupby('Fecha').agg({'Agentes Plantilla':'max', 'Agentes Log':'max'}).reset_index(), on='Fecha', how='left')
 
     if not df_ppto.empty and len(df_ppto.columns) > 37:
+        # Aquí usamos la función especial solo para esta hoja
         df_ppto['Fecha'] = parse_fecha_sucia(df_ppto.iloc[:, 35], año_sel)
         df_ppto['Meta Día Lead Efectivo'] = pd.to_numeric(df_ppto.iloc[:, 36], errors='coerce').fillna(0)
         df_ppto['Meta Asesor'] = pd.to_numeric(df_ppto.iloc[:, 37], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_ppto.groupby('Fecha').agg({'Meta Día Lead Efectivo':'max', 'Meta Asesor':'max'}).reset_index(), on='Fecha', how='left')
 
     if not df_malla.empty and len(df_malla.columns) > 13:
-        df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13], año_sel)
+        # Revertido al formato original que sí funcionaba bien para esta hoja
+        df_malla['Fecha'] = pd.to_datetime(df_malla.iloc[:, 13], errors='coerce').dt.date
         col_tr_idx = next((i for i, c in enumerate(df_malla.columns) if 'tiempo' in str(c).lower()), -1)
         if col_tr_idx != -1:
             df_malla['Tiempo Real'] = pd.to_numeric(df_malla.iloc[:, col_tr_idx], errors='coerce').fillna(0)
@@ -166,7 +167,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     totales['% AP dia'] = totales['AP Totales'] / totales['Lead Efectivo'] if totales.get('Lead Efectivo', 0) > 0 else 0
     totales['AP Acum'] = totales['% AP dia']
     
-    # El GAP Total es el último valor calculado que no sea 0
     df_gap_valido = df_final[df_final['GAP LE'] != 0]
     totales['GAP LE'] = df_gap_valido['GAP LE'].iloc[-1] if not df_gap_valido.empty else 0
     
@@ -193,7 +193,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     
     st.divider()
 
-    # --- FORMATO LIMPIO (0 decimales para números, 2 para promedios) ---
+    # --- FORMATO LIMPIO (0 decimales números, 1 % , 2 promedios) ---
     format_dict = {}
     for c in df_vista.columns:
         if c == 'Día': continue
