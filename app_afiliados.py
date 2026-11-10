@@ -4,7 +4,6 @@ import numpy as np
 import holidays
 from datetime import date
 import calendar
-import re
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
@@ -21,8 +20,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros")
     
-    # 1. PREPARACIÓN VENTAS
-    # E(4)=Fecha Vta, H(7)=Estado, AT(45)=Decision, AX(49)=Fecha Decision
+    # 1. PREPARACIÓN VENTAS (E=4, H=7, AT=45, AX=49)
     df_ventas['F_VTA'] = pd.to_datetime(df_ventas.iloc[:, 4], errors='coerce').dt.date
     df_ventas['ESTADO'] = df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
     df_ventas['DECISION'] = df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
@@ -51,17 +49,17 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if asesor_sel != "Todos":
             df_ventas = df_ventas[df_ventas[col_as] == asesor_sel]
 
-    # --- FUNCIÓN INTELIGENTE PARA FECHAS SUCIAS ("mar-20-oct") ---
-    def parse_fecha_sucia(serie):
-        s = serie.astype(str).str.lower()
-        def extract(val):
-            m = re.search(r'(\d{1,2}-[a-z]{3})', val) # Busca ej: "20-oct"
-            return m.group(1) + f"-{año_sel}" if m else val
-        s = s.apply(extract)
+    # --- FUNCIÓN VECTORIZADA ANTI-ERRORES PARA FECHAS SUCIAS ---
+    def parse_fecha_sucia(serie, año):
+        s = serie.astype(str).str.lower().str.strip()
         meses_esp = {'ene':'jan', 'feb':'feb', 'mar':'mar', 'abr':'apr', 'may':'may', 'jun':'jun', 'jul':'jul', 'ago':'aug', 'sep':'sep', 'oct':'oct', 'nov':'nov', 'dic':'dec'}
         for esp, eng in meses_esp.items():
-            s = s.str.replace(esp, eng)
-        return pd.to_datetime(s, errors='coerce').dt.date
+            s = s.str.replace(esp, eng, regex=False)
+        
+        # Extrae el patrón 20-oct de manera segura
+        extraido = s.str.extract(r'(\d{1,2}-[a-z]{3})')[0]
+        s_final = np.where(extraido.notna(), extraido + f"-{año}", s)
+        return pd.to_datetime(s_final, errors='coerce').dt.date
 
     # --- CALENDARIO BASE ---
     festivos_mx = holidays.Mexico(years=año_sel)
@@ -72,23 +70,20 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
     # --- PREPARACIÓN HOJAS AUXILIARES ---
-    # Planta: A(0)=Fecha, B(1)=Plantilla, C(2)=Log
     if not df_planta.empty and len(df_planta.columns) > 2:
         df_planta['Fecha'] = pd.to_datetime(df_planta.iloc[:, 0], errors='coerce').dt.date
         df_planta['Agentes Plantilla'] = pd.to_numeric(df_planta.iloc[:, 1], errors='coerce').fillna(0)
         df_planta['Agentes Log'] = pd.to_numeric(df_planta.iloc[:, 2], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_planta.groupby('Fecha').agg({'Agentes Plantilla':'max', 'Agentes Log':'max'}).reset_index(), on='Fecha', how='left')
 
-    # Seg PPTO: AJ(35)=Fecha, AK(36)=Meta Día, AL(37)=Meta Asesor
     if not df_ppto.empty and len(df_ppto.columns) > 37:
-        df_ppto['Fecha'] = parse_fecha_sucia(df_ppto.iloc[:, 35])
+        df_ppto['Fecha'] = parse_fecha_sucia(df_ppto.iloc[:, 35], año_sel)
         df_ppto['Meta Día Lead Efectivo'] = pd.to_numeric(df_ppto.iloc[:, 36], errors='coerce').fillna(0)
         df_ppto['Meta Asesor'] = pd.to_numeric(df_ppto.iloc[:, 37], errors='coerce').fillna(0)
         df_cal = pd.merge(df_cal, df_ppto.groupby('Fecha').agg({'Meta Día Lead Efectivo':'max', 'Meta Asesor':'max'}).reset_index(), on='Fecha', how='left')
 
-    # Malla Día: N(13)=Fecha, Tiempo real(buscar nombre)
     if not df_malla.empty and len(df_malla.columns) > 13:
-        df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13])
+        df_malla['Fecha'] = parse_fecha_sucia(df_malla.iloc[:, 13], año_sel)
         col_tr_idx = next((i for i, c in enumerate(df_malla.columns) if 'tiempo' in str(c).lower()), -1)
         if col_tr_idx != -1:
             df_malla['Tiempo Real'] = pd.to_numeric(df_malla.iloc[:, col_tr_idx], errors='coerce').fillna(0)
@@ -98,7 +93,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if col not in df_cal.columns: df_cal[col] = 0
     df_cal = df_cal.fillna(0)
 
-    # --- AGRUPACIÓN 1: POR FECHA DE VENTA (TRÁMITES) ---
+    # --- AGRUPACIÓN 1: POR FECHA DE VENTA ---
     df_ventas_vta = df_ventas[(pd.to_datetime(df_ventas['F_VTA']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_VTA']).dt.month == mes_sel)]
     agrup_vta = df_ventas_vta.groupby('F_VTA').apply(lambda x: pd.Series({
         'Tramites': len(x),
@@ -113,26 +108,25 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         'Pendiente': (x['DECISION'] == 'P').sum()
     })).reset_index().rename(columns={'F_VTA': 'Fecha'})
 
-    # --- AGRUPACIÓN 2: POR FECHA DE DECISIÓN (AP COSECHA Y AP MES) ---
+    # --- AGRUPACIÓN 2: POR FECHA DE DECISIÓN (COSECHA VS MES) ---
     df_ventas_dec = df_ventas[(pd.to_datetime(df_ventas['F_DEC']).dt.year == año_sel) & (pd.to_datetime(df_ventas['F_DEC']).dt.month == mes_sel) & (df_ventas['DECISION'] == 'A')]
     agrup_dec = df_ventas_dec.groupby('F_DEC').apply(lambda x: pd.Series({
         'AP MES': (pd.to_datetime(x['F_VTA']).dt.month == mes_sel).sum(),
         'AP COSECHA': (pd.to_datetime(x['F_VTA']).dt.month != mes_sel).sum()
     })).reset_index().rename(columns={'F_DEC': 'Fecha'})
 
-    # --- CRUCE FINAL ---
+    # --- CRUCE FINAL Y CÁLCULOS GERENCIALES ---
     df_final = pd.merge(df_cal, agrup_vta, on="Fecha", how="left").fillna(0)
     df_final = pd.merge(df_final, agrup_dec, on="Fecha", how="left").fillna(0)
     
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
     df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[pd.to_datetime(row['Fecha']).dayofweek]}-{pd.to_datetime(row['Fecha']).strftime('%d-%b')}".lower(), axis=1)
 
-    # --- CÁLCULOS GERENCIALES Y RENOMBRES ---
     df_final['Meta Lead Efectivos Programados'] = df_final['Meta Asesor'] * df_final['Agentes Plantilla']
     df_final['Meta Lead Efectivos Log'] = df_final['Meta Asesor'] * df_final['Agentes Log']
     df_final['Diferencia LE'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Log']
     
-    # GAP LE: Sumatoria solo hasta el día de ayer
+    # GAP LE: Solo suma la meta de los días pasados (hasta ayer)
     df_final['GAP LE'] = 0.0
     mask_pasado = df_final['Fecha'] < date.today()
     df_final.loc[mask_pasado, 'GAP LE'] = df_final.loc[mask_pasado, 'Meta Día Lead Efectivo'].cumsum() - df_final.loc[mask_pasado, 'Lead Efectivo'].cumsum()
@@ -161,10 +155,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     ]
     df_vista = df_final[[c for c in columnas_vista if c in df_final.columns]].copy()
 
-    # --- FILA DE TOTALES DINÁMICA ---
+    # --- FILA DE TOTALES INTELIGENTE ---
     totales = df_final.sum(numeric_only=True).to_dict()
     totales['Día'] = 'TOTAL'
-    # Recalculamos promedios y porcentajes matemáticamente
     totales['% LE'] = totales['Lead Efectivo'] / totales['Tramites'] if totales.get('Tramites', 0) > 0 else 0
     totales['% REM/RECH'] = totales['Otros'] / totales['Tramites'] if totales.get('Tramites', 0) > 0 else 0
     totales['Prom'] = totales['Agentes Log'] / totales['Lead Efectivo'] if totales.get('Lead Efectivo', 0) > 0 else 0
@@ -172,25 +165,27 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     totales['SPH'] = totales['Lead Efectivo'] / totales.get('Tiempo Real', 1) if totales.get('Tiempo Real', 0) > 0 else 0
     totales['% AP dia'] = totales['AP Totales'] / totales['Lead Efectivo'] if totales.get('Lead Efectivo', 0) > 0 else 0
     totales['AP Acum'] = totales['% AP dia']
-    totales['GAP LE'] = df_final.loc[df_final['GAP LE'] != 0, 'GAP LE'].iloc[-1] if not df_final[df_final['GAP LE'] != 0].empty else 0
+    
+    # El GAP Total es el último valor calculado que no sea 0
+    df_gap_valido = df_final[df_final['GAP LE'] != 0]
+    totales['GAP LE'] = df_gap_valido['GAP LE'].iloc[-1] if not df_gap_valido.empty else 0
     
     df_totales = pd.DataFrame([totales])[df_vista.columns]
     df_vista = pd.concat([df_vista, df_totales], ignore_index=True)
 
-    # --- KPIS SUPERIORES (7 CAJAS) ---
+    # --- KPIS SUPERIORES ---
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
-    # Encontrar último día de aprobación
-    df_aprob = df_final[df_final['AP MES'] > 0]
-    ultimo_dia_ap = df_aprob['Fecha'].max().strftime('%d-%b') if not df_aprob.empty else "N/A"
+    df_aprob = df_final[df_final['AP Totales'] > 0]
+    ultimo_dia_ap = df_aprob['Fecha'].max().strftime('%d-%b').lower() if not df_aprob.empty else "N/A"
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Trámites Totales", f"{int(totales['Tramites'])}")
     col2.metric("Leads Efectivos", f"{int(totales['Lead Efectivo'])}")
     col3.metric("GAP LE Acumulado", f"{int(totales['GAP LE'])}")
-    col4.metric("Últ. Día Aprobación", ultimo_dia_ap)
+    col4.metric("Último Día de Aprobación", ultimo_dia_ap)
     
-    st.write("") # Espacio
+    st.write("")
     col5, col6, col7, col8 = st.columns(4)
     col5.metric("AP Mes", f"{int(totales['AP MES'])}")
     col6.metric("AP Cosecha", f"{int(totales['AP COSECHA'])}")
@@ -198,7 +193,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     
     st.divider()
 
-    # --- FORMATO FINAL (0 Decimales para números, 1 para %, 2 para Promedios) ---
+    # --- FORMATO LIMPIO (0 decimales para números, 2 para promedios) ---
     format_dict = {}
     for c in df_vista.columns:
         if c == 'Día': continue
@@ -213,14 +208,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
         if val > 0: return 'background-color: #ffc000; color: black;'
         return ''
 
-    # Aplicamos estilos a la tabla 
     styler = df_vista.style.format(format_dict)\
                            .map(semaforo_le, subset=['% LE'] if '% LE' in df_vista.columns else [])\
                            .set_properties(**{'text-align': 'center', 'font-size': '13px'})
                            
-    # Resaltamos visualmente la fila de TOTALES en negrita
     styler = styler.apply(lambda x: ['font-weight: bold; background-color: #f0f2f6' if x.name == len(df_vista)-1 else '' for i in x], axis=1)
 
     st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 else:
-    st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas. Asegúrate de ejecutar tu script en la PC primero.")
+    st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
