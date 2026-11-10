@@ -9,7 +9,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 
-# CSS para Tarjetas Gerenciales, Contenedores y Alineación de Tabla
+# CSS para Tarjetas Gerenciales, Contenedores y Centrado Absoluto de Tabla
 st.markdown(
     """
 <style>
@@ -60,9 +60,13 @@ st.markdown(
     }
     .table-card-row:last-child { border-bottom: none; }
     
-    /* Forzar centrado de celdas en la tabla */
-    [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+    /* Forzar centrado absoluto de celdas y encabezados en la tabla */
+    [data-testid="stDataFrame"] td, 
+    [data-testid="stDataFrame"] th,
+    div[data-testid="stDataFrame"] div[role="gridcell"],
+    div[data-testid="stDataFrame"] div[role="columnheader"] {
         text-align: center !important;
+        justify-content: center !important;
     }
 </style>
 """,
@@ -101,8 +105,8 @@ def render_gauge_svg(pct):
     </div>"""
 
 
-# Helper para degradado de colores en RGB
-def interpolate_color(val, vmin, vmax, rgb_low, rgb_high):
+# Interpolación en 2 puntos (Ej. Blanco a Verde)
+def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
   if pd.isna(val) or vmin == vmax:
     return ""
   norm = (val - vmin) / (vmax - vmin)
@@ -110,7 +114,28 @@ def interpolate_color(val, vmin, vmax, rgb_low, rgb_high):
   r = int(rgb_low[0] + norm * (rgb_high[0] - rgb_low[0]))
   g = int(rgb_low[1] + norm * (rgb_high[1] - rgb_low[1]))
   b = int(rgb_low[2] + norm * (rgb_high[2] - rgb_low[2]))
-  return f"background-color: rgb({r}, {g}, {b}); color: black;"
+  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
+
+
+# Interpolación en 3 puntos con tono intermedio Naranja
+def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
+  if pd.isna(val) or vmin == vmax:
+    return ""
+  norm = (val - vmin) / (vmax - vmin)
+  norm = max(0.0, min(1.0, norm))
+
+  if norm <= 0.5:
+    t = norm / 0.5
+    r = int(rgb_low[0] + t * (rgb_mid[0] - rgb_low[0]))
+    g = int(rgb_low[1] + t * (rgb_mid[1] - rgb_low[1]))
+    b = int(rgb_low[2] + t * (rgb_mid[2] - rgb_low[2]))
+  else:
+    t = (norm - 0.5) / 0.5
+    r = int(rgb_mid[0] + t * (rgb_high[0] - rgb_mid[0]))
+    g = int(rgb_mid[1] + t * (rgb_high[1] - rgb_mid[1]))
+    b = int(rgb_mid[2] + t * (rgb_high[2] - rgb_mid[2]))
+
+  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
 
 
 @st.cache_data
@@ -262,7 +287,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       ~((df_cal["Día_Semana"] == 6) | (df_cal["Es_Festivo"]))
   ].copy()
 
-  # FILTROS ADICIONALES SIDEBAR (Día Semana, Fechas Específicas, Rango Fechas)
+  # FILTROS ADICIONALES SIDEBAR
   dias_nombres_map = {
       0: "Lunes",
       1: "Martes",
@@ -500,9 +525,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       / df_final["Agentes Plantilla"],
       0,
   )
+
+  # AJUSTE REQUERIDO DE SPH: Lead Efectivo / Agentes Log
   df_final["SPH"] = np.where(
-      df_final["Tiempo Real"] > 0,
-      df_final["Lead Efectivo"] / df_final["Tiempo Real"],
+      df_final["Agentes Log"] > 0,
+      df_final["Lead Efectivo"] / df_final["Agentes Log"],
       0,
   )
 
@@ -545,7 +572,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       0,
   )
 
-  # SE AÑADE '% Aprob Acum Mes' JUSTO DESPUÉS DE '% AP dia'
   columnas_vista = [
       "Día",
       "Tramites",
@@ -609,11 +635,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       if totales.get("Agentes Plantilla", 0) > 0
       else 0
   )
+
+  # AJUSTE SPH EN TOTALES
   totales["SPH"] = (
-      totales["Lead Efectivo"] / totales.get("Tiempo Real", 1)
-      if totales.get("Tiempo Real", 0) > 0
+      totales["Lead Efectivo"] / totales["Agentes Log"]
+      if totales.get("Agentes Log", 0) > 0
       else 0
   )
+
   totales["% AP dia"] = (
       totales["AP Totales"] / totales["Lead Efectivo"]
       if totales.get("Lead Efectivo", 0) > 0
@@ -861,13 +890,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     else:
       format_dict[c] = "{:.0f}"
 
-  # FORMATOS CONDICIONALES APLICADOS HASTA EL DÍA DE AYER
-  # Paletas de colores RGB
-  rgb_green = (198, 224, 180)  # Verde suave (#c6e0b4)
-  rgb_red = (248, 113, 113)  # Rojo suave (#f87171)
+  # PALETAS DE COLORES SOBRIAS Y EQUILIBRADAS (RGB)
+  rgb_green = (162, 217, 163)  # Verde suave (#a2d9a3)
+  rgb_orange = (254, 210, 120)  # Naranja intermedio suave (#fed278)
+  rgb_red = (248, 140, 140)  # Rojo suave (#f88c8c)
   rgb_white = (255, 255, 255)  # Blanco (#ffffff)
 
-  # Precalculamos valores mínimos y máximos hasta ayer
   mask_hasta_ayer = df_final["Fecha"] < date.today()
   df_pasado_vals = df_final[mask_hasta_ayer]
 
@@ -898,87 +926,90 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
     min_max_dict[col] = (vmin, vmax)
 
   def aplicar_formatos_condicionales(df_input):
-    # Dataframe de estilos vacío
     styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
 
     for idx, row in df_input.iterrows():
       dia_str = str(row["Día"])
+      base_align = "text-align: center !important;"
 
       # Resalte Fila TOTAL
       if dia_str == "TOTAL":
-        styles.loc[idx, :] = "font-weight: bold; background-color: #f0f2f6;"
+        styles.loc[idx, :] = (
+            "font-weight: bold; background-color: #f0f2f6; text-align: center"
+            " !important;"
+        )
         continue
 
       # Resalte Fila Última Aprobación (Azul Suave)
       es_ultimo_ap = (
           ultimo_dia_ap != "N/A" and ultimo_dia_ap in dia_str.lower()
       )
-      base_style = (
-          "background-color: #dbeafe; font-weight: bold; border-left: 3px"
-          " solid #2563eb;"
+      row_base_style = (
+          "background-color: #dbeafe; font-weight: bold; border-left: 3px solid"
+          " #2563eb; "
           if es_ultimo_ap
           else ""
       )
 
-      # Determinar si la fila corresponde a una fecha transcurrida (< ayer)
       corresponde_pasado = False
       if idx < len(df_final):
         corresponde_pasado = df_final.iloc[idx]["Fecha"] < date.today()
 
       for col in df_input.columns:
-        if base_style:
-          styles.loc[idx, col] = base_style
+        cell_style = base_align + row_base_style
 
-        if not corresponde_pasado:
-          continue
+        if corresponde_pasado:
+          val = row[col]
+          if isinstance(val, (int, float, np.number)):
+            if col == "Lead Efectivo":
+              es_sabado = "sáb" in dia_str.lower()
+              if not es_sabado:
+                vmin, vmax = min_max_dict["Lead Efectivo"]
+                bg = interpolate_color_2pt(
+                    val, vmin, vmax, rgb_white, rgb_green
+                )
+                if bg:
+                  cell_style += " " + bg
 
-        val = row[col]
-        if not isinstance(val, (int, float, np.number)):
-          continue
+            elif col in [
+                "% LE",
+                "Prom",
+                "% AP dia",
+                "% Aprob Acum Mes",
+                "% AP Acum",
+                "% EVALUADO",
+            ]:
+              # Verde a Rojo con Naranja Intermedio
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_3pt(
+                  val, vmin, vmax, rgb_red, rgb_orange, rgb_green
+              )
+              if bg:
+                cell_style += " " + bg
 
-        # REGULARES CONDICIONALES
-        if col == "Lead Efectivo":
-          # Verde a Blanco sin contar sábados
-          es_sabado = "sáb" in dia_str.lower()
-          if not es_sabado:
-            vmin, vmax = min_max_dict["Lead Efectivo"]
-            styles.loc[idx, col] = interpolate_color(
-                val, vmin, vmax, rgb_white, rgb_green
-            )
+            elif col == "% REM/RECH":
+              # Rojo a Verde con Naranja Intermedio
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_3pt(
+                  val, vmin, vmax, rgb_green, rgb_orange, rgb_red
+              )
+              if bg:
+                cell_style += " " + bg
 
-        elif col in [
-            "% LE",
-            "Prom",
-            "% AP dia",
-            "% Aprob Acum Mes",
-            "% AP Acum",
-            "% EVALUADO",
-        ]:
-          # Verde a Rojo (Mayor es verde, Menor es rojo)
-          vmin, vmax = min_max_dict[col]
-          styles.loc[idx, col] = interpolate_color(
-              val, vmin, vmax, rgb_red, rgb_green
-          )
+            elif col in ["SPH", "NO GESTIONADO"]:
+              # Verde a Blanco
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
+              if bg:
+                cell_style += " " + bg
 
-        elif col == "% REM/RECH":
-          # Rojo a Verde (Mayor es rojo, Menor es verde)
-          vmin, vmax = min_max_dict[col]
-          styles.loc[idx, col] = interpolate_color(
-              val, vmin, vmax, rgb_green, rgb_red
-          )
-
-        elif col in ["SPH", "NO GESTIONADO"]:
-          # Verde a Blanco
-          vmin, vmax = min_max_dict[col]
-          styles.loc[idx, col] = interpolate_color(
-              val, vmin, vmax, rgb_white, rgb_green
-          )
+        styles.loc[idx, col] = cell_style
 
     return styles
 
   styler = (
       df_vista.style.format(format_dict)
-      .set_properties(**{"text-align": "center", "font-size": "13px"})
+      .set_properties(**{"text-align": "center !important", "font-size": "13px"})
       .apply(aplicar_formatos_condicionales, axis=None)
   )
 
