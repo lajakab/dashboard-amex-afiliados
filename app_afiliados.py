@@ -12,6 +12,7 @@ st.set_page_config(page_title="Informe Gerencial Amex", layout="wide")
 def cargar_datos():
     try:
         df = pd.read_parquet(ARCHIVO_DATOS)
+        df.columns = [str(c).strip().lower() for c in df.columns]
         if 'fecha_vta' in df.columns:
             df['fecha_vta'] = pd.to_datetime(df['fecha_vta'], errors='coerce')
         if 'fecha_decision' in df.columns:
@@ -27,7 +28,6 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png", width=150)
     st.sidebar.header("🔍 Filtros")
     
-    # Filtros de Fecha
     fechas_validas = df_raw['fecha_vta'].dropna()
     años_disp = sorted(fechas_validas.dt.year.unique()) if not fechas_validas.empty else [date.today().year]
     año_sel = st.sidebar.selectbox("Año", años_disp, index=len(años_disp)-1)
@@ -39,14 +39,14 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     mes_sel_nombre = st.sidebar.selectbox("Mes", mes_formateado, index=len(mes_formateado)-1) if mes_formateado else "Noviembre"
     mes_sel = list(nombres_meses.keys())[list(nombres_meses.values()).index(mes_sel_nombre)]
 
-    # Filtro opcional por Asesor (si existe la columna)
+    # Corrección del SyntaxError en esta línea
     if 'asesor' in df_raw.columns:
-        asesores = ["Todos"] + sorted(df_raw['asesor].dropna().astype(str).unique().tolist())
+        asesores = ["Todos"] + sorted(df_raw['asesor'].dropna().astype(str).unique().tolist())
         asesor_sel = st.sidebar.selectbox("Asesor", asesores)
         if asesor_sel != "Todos":
             df_raw = df_raw[df_raw['asesor'] == asesor_sel]
 
-    # --- CALENDARIO VERTICAL (Lun a Sab sin festivos MX) ---
+    # Calendario
     festivos_mx = holidays.Mexico(years=año_sel)
     num_dias = calendar.monthrange(año_sel, mes_sel)[1]
     fechas_mes = [date(año_sel, mes_sel, d) for d in range(1, num_dias + 1)]
@@ -56,11 +56,11 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     df_cal['Es_Festivo'] = df_cal['Fecha'].apply(lambda x: x in festivos_mx)
     df_cal = df_cal[~((df_cal['Día_Semana'] == 6) | (df_cal['Es_Festivo']))].copy()
 
-    # --- FILTRAR MES Y AGRUPAR (El Cerebro) ---
+    # Filtro de mes
     df_filtro = df_raw[(df_raw['fecha_vta'].dt.year == año_sel) & (df_raw['fecha_vta'].dt.month == mes_sel)].copy()
 
     if not df_filtro.empty:
-        # Aseguramos columnas por si falta alguna en el Excel original
+        # Prevención de errores rellenando columnas faltantes temporalmente
         for col in ['estado', 'decision', 'fecha_decision', 'agentes_plantilla', 'agentes_log', 'meta_dia', 'meta_asesor', 'tiempo_real']:
             if col not in df_filtro.columns: df_filtro[col] = 0 if 'agentes' in col or 'meta' in col or 'tiempo' in col else ''
 
@@ -89,12 +89,12 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     else:
         agrupado = pd.DataFrame(columns=['Fecha', 'Tramites', 'Lead Efectivo'])
 
-    # UNIMOS CON EL CALENDARIO
+    # Cruce con calendario
     df_final = pd.merge(df_cal, agrupado, on="Fecha", how="left").fillna(0)
     dias_esp = {0:"lun", 1:"mar", 2:"mié", 3:"jue", 4:"vie", 5:"sáb"}
     df_final['Día'] = df_final.apply(lambda row: f"{dias_esp[row['Día_Semana']]}-{row['Fecha'].strftime('%d-%b')}".lower(), axis=1)
 
-    # --- TUS FÓRMULAS EXACTAS ---
+    # Fórmulas Gerenciales
     df_final['Meta Lead Efectivos Programados'] = df_final.get('Meta Asesor', 0) * df_final.get('Agentes Plantilla', 0)
     df_final['Meta Lead Efectivos Asistieron'] = df_final.get('Meta Asesor', 0) * df_final.get('Agentes Log', 0)
     df_final['Diferencia'] = df_final['Meta Lead Efectivos Programados'] - df_final['Meta Lead Efectivos Asistieron']
@@ -116,7 +116,6 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     df_final['% Cancelado'] = np.where(df_final['Lead Efectivo'] > 0, df_final.get('Cancelado', 0) / df_final['Lead Efectivo'], 0)
     df_final['% Pendiente'] = np.where(df_final['Lead Efectivo'] > 0, df_final.get('Pendiente', 0) / df_final['Lead Efectivo'], 0)
 
-    # VISTA FINAL ORDENADA
     columnas_vista = [
         'Día', 'Tramites', 'Lead Efectivo', 'Meta Lead Efectivos Programados', 'Meta Lead Efectivos Asistieron', 'Diferencia',
         'Lead No Capturado', 'Lead No Condiciones', 'Otros', '% LE', '% REM/RECH', 'Prom',
@@ -127,7 +126,6 @@ if not df_raw.empty and 'fecha_vta' in df_raw.columns:
     ]
     df_vista = df_final[[c for c in columnas_vista if c in df_final.columns]].copy()
 
-    # --- RENDER EN PANTALLA ---
     st.title(f"📊 Informe Gerencial - {mes_sel_nombre} {año_sel}")
     
     k1, k2, k3, k4 = st.columns(4)
