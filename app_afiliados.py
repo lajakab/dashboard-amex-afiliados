@@ -207,7 +207,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   )
   st.sidebar.header("🔍 Filtros")
 
-  # DETECCIÓN DE COLUMNAS EN HOJA VENTAS (NOMBRE O ÍNDICE)
+  # DETECCIÓN DE COLUMNAS SEGÚN LA FÓRMULA EXACTA DE EXCEL:
+  # Ventas!E:E -> Fecha de Venta (Columna E = índice 4)
   col_fvta = next(
       (
           i
@@ -217,15 +218,30 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       ),
       4,
   )
-  col_estado = next(
-      (
-          i
-          for i, c in enumerate(df_ventas.columns)
-          if str(c).strip().upper()
-          in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]
-      ),
-      7,
+
+  # Ventas!C:C -> Estado "LEAD EFECTIVO" (Columna C = índice 2)
+  col_c_has_le = (
+      len(df_ventas.columns) > 2
+      and (
+          df_ventas.iloc[:, 2].astype(str).str.strip().str.upper()
+          == "LEAD EFECTIVO"
+      ).any()
   )
+  col_estado = (
+      2
+      if col_c_has_le
+      else next(
+          (
+              i
+              for i, c in enumerate(df_ventas.columns)
+              if str(c).strip().upper()
+              in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]
+          ),
+          7,
+      )
+  )
+
+  # Columna AT -> Decisión (índice 45)
   col_dec = next(
       (
           i
@@ -242,6 +258,39 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       ),
       45,
   )
+
+  # Ventas!BX:BX -> Columna BX para NO GESTIONADO (Columna BX = índice 75)
+  col_bx = 75 if len(df_ventas.columns) > 75 else -1
+
+  # PREPARACIÓN VENTAS
+  df_ventas["F_VTA"] = pd.to_datetime(
+      df_ventas.iloc[:, col_fvta], errors="coerce"
+  ).dt.date
+  df_ventas["ESTADO"] = (
+      df_ventas.iloc[:, col_estado].astype(str).str.strip().str.upper()
+  )
+  df_ventas["DECISION"] = (
+      df_ventas.iloc[:, col_dec].astype(str).str.strip().str.upper()
+  )
+
+  # Flag para identificar celdas vacías "" en la Columna BX (Ventas!$BX:$BX; "")
+  if col_bx != -1:
+    bx_str = df_ventas.iloc[:, col_bx].astype(str).str.strip()
+    df_ventas["BX_EMPTY"] = (
+        df_ventas.iloc[:, col_bx].isna()
+        | (bx_str == "")
+        | (bx_str.str.upper() == "NAN")
+        | (bx_str == "None")
+    )
+  else:
+    dec_str = df_ventas.iloc[:, col_dec].astype(str).str.strip()
+    df_ventas["BX_EMPTY"] = (
+        df_ventas.iloc[:, col_dec].isna()
+        | (dec_str == "")
+        | (dec_str == "-")
+        | (dec_str.str.upper() == "NAN")
+    )
+
   col_fdec = next(
       (
           i
@@ -256,17 +305,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
           ]
       ),
       49 if len(df_ventas.columns) > 49 else -1,
-  )
-
-  # PREPARACIÓN VENTAS
-  df_ventas["F_VTA"] = pd.to_datetime(
-      df_ventas.iloc[:, col_fvta], errors="coerce"
-  ).dt.date
-  df_ventas["ESTADO"] = (
-      df_ventas.iloc[:, col_estado].astype(str).str.strip().str.upper()
-  )
-  df_ventas["DECISION"] = (
-      df_ventas.iloc[:, col_dec].astype(str).str.strip().str.upper()
   )
 
   if col_fdec != -1 and len(df_ventas.columns) > col_fdec:
@@ -552,11 +590,12 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     is_le = x["ESTADO"] == "LEAD EFECTIVO"
     dec = x["DECISION"].astype(str).str.strip().str.upper()
 
-    # Evaluados son los Lead Efectivo cuya decisión es A, D, P o C
+    # Evaluados: LEAD EFECTIVO con decisión A, D, P o C
     is_eval = is_le & dec.isin(["A", "D", "P", "C"])
 
-    # No Gestionados son todos los Lead Efectivo cuya decisión NO es A, D, P ni C (ej. '-', '', 'NAN', etc.)
-    is_no_gest = is_le & (~dec.isin(["A", "D", "P", "C"]))
+    # NO GESTIONADO EXACTO A FÓRMULA EXCEL:
+    # Ventas!C:C = "LEAD EFECTIVO" y Ventas!BX:BX = "" (vacío)
+    is_no_gest = is_le & x["BX_EMPTY"]
 
     return pd.Series({
         "Tramites": len(x),
