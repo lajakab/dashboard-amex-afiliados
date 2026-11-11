@@ -200,27 +200,78 @@ def cargar_pestanas():
 
 df_ventas, df_planta, df_ppto, df_malla = cargar_pestanas()
 
-if not df_ventas.empty and len(df_ventas.columns) > 45:
+if not df_ventas.empty and len(df_ventas.columns) > 40:
   st.sidebar.image(
       "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/American_Express_logo_%282018%29.svg/1200px-American_Express_logo_%282018%29.svg.png",
       width=150,
   )
   st.sidebar.header("🔍 Filtros")
 
-  # PREPARACIÓN VENTAS
-  df_ventas["F_VTA"] = pd.to_datetime(
-      df_ventas.iloc[:, 4], errors="coerce"
-  ).dt.date
-  df_ventas["ESTADO"] = (
-      df_ventas.iloc[:, 7].astype(str).str.strip().str.upper()
+  # DETECCIÓN DE COLUMNAS EN HOJA VENTAS (NOMBRE O ÍNDICE)
+  col_fvta = next(
+      (
+          i
+          for i, c in enumerate(df_ventas.columns)
+          if str(c).strip().upper()
+          in ["FECHA VENTA", "F_VTA", "FECHA_VENTA", "FECHA VTA"]
+      ),
+      4,
   )
-  df_ventas["DECISION"] = (
-      df_ventas.iloc[:, 45].astype(str).str.strip().str.upper()
+  col_estado = next(
+      (
+          i
+          for i, c in enumerate(df_ventas.columns)
+          if str(c).strip().upper()
+          in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]
+      ),
+      7,
+  )
+  col_dec = next(
+      (
+          i
+          for i, c in enumerate(df_ventas.columns)
+          if str(c).strip().upper()
+          in [
+              "DECISION",
+              "DECISIÓN",
+              "AT",
+              "DECISION FINAL",
+              "ESTADO DECISION",
+              "DECISION_FINAL",
+          ]
+      ),
+      45,
+  )
+  col_fdec = next(
+      (
+          i
+          for i, c in enumerate(df_ventas.columns)
+          if str(c).strip().upper()
+          in [
+              "FECHA DECISION",
+              "FECHA DECISIÓN",
+              "F_DEC",
+              "FECHA_DECISION",
+              "FECHA DEC",
+          ]
+      ),
+      49 if len(df_ventas.columns) > 49 else -1,
   )
 
-  if len(df_ventas.columns) > 49:
+  # PREPARACIÓN VENTAS
+  df_ventas["F_VTA"] = pd.to_datetime(
+      df_ventas.iloc[:, col_fvta], errors="coerce"
+  ).dt.date
+  df_ventas["ESTADO"] = (
+      df_ventas.iloc[:, col_estado].astype(str).str.strip().str.upper()
+  )
+  df_ventas["DECISION"] = (
+      df_ventas.iloc[:, col_dec].astype(str).str.strip().str.upper()
+  )
+
+  if col_fdec != -1 and len(df_ventas.columns) > col_fdec:
     df_ventas["F_DEC"] = pd.to_datetime(
-        df_ventas.iloc[:, 49], errors="coerce"
+        df_ventas.iloc[:, col_fdec], errors="coerce"
     ).dt.date
   else:
     df_ventas["F_DEC"] = pd.NaT
@@ -495,39 +546,43 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
       & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
   ]
+
+
+  def agrupar_ventas_dia(x):
+    is_le = x["ESTADO"] == "LEAD EFECTIVO"
+    dec = x["DECISION"].astype(str).str.strip().str.upper()
+
+    # Evaluados son los Lead Efectivo cuya decisión es A, D, P o C
+    is_eval = is_le & dec.isin(["A", "D", "P", "C"])
+
+    # No Gestionados son todos los Lead Efectivo cuya decisión NO es A, D, P ni C (ej. '-', '', 'NAN', etc.)
+    is_no_gest = is_le & (~dec.isin(["A", "D", "P", "C"]))
+
+    return pd.Series({
+        "Tramites": len(x),
+        "Lead Efectivo": is_le.sum(),
+        "Lead No Capturado": (x["ESTADO"] == "LEAD NO CAPTURADO").sum(),
+        "Lead No Condiciones": (x["ESTADO"] == "LEAD NO CONDICIONES").sum(),
+        "Otros": (
+            ~x["ESTADO"].isin([
+                "LEAD EFECTIVO",
+                "LEAD NO CAPTURADO",
+                "LEAD NO CONDICIONES",
+                "",
+                "NAN",
+            ])
+        ).sum(),
+        "EVALUADO": is_eval.sum(),
+        "NO GESTIONADO": is_no_gest.sum(),
+        "Declinado": (is_le & (dec == "D")).sum(),
+        "Cancelado": (is_le & (dec == "C")).sum(),
+        "Pendiente": (is_le & (dec == "P")).sum(),
+    })
+
+
   agrup_vta = (
       df_ventas_vta.groupby("F_VTA")
-      .apply(lambda x: pd.Series({
-          "Tramites": len(x),
-          "Lead Efectivo": (x["ESTADO"] == "LEAD EFECTIVO").sum(),
-          "Lead No Capturado": (x["ESTADO"] == "LEAD NO CAPTURADO").sum(),
-          "Lead No Condiciones": (x["ESTADO"] == "LEAD NO CONDICIONES").sum(),
-          "Otros": (
-              ~x["ESTADO"].isin([
-                  "LEAD EFECTIVO",
-                  "LEAD NO CAPTURADO",
-                  "LEAD NO CONDICIONES",
-                  "",
-                  "NAN",
-              ])
-          ).sum(),
-          "EVALUADO": (
-              (x["ESTADO"] == "LEAD EFECTIVO")
-              & (x["DECISION"].isin(["A", "D", "P", "C"]))
-          ).sum(),
-          "NO GESTIONADO": (
-              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "-")
-          ).sum(),
-          "Declinado": (
-              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "D")
-          ).sum(),
-          "Cancelado": (
-              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "C")
-          ).sum(),
-          "Pendiente": (
-              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "P")
-          ).sum(),
-      }))
+      .apply(agrupar_ventas_dia)
       .reset_index()
       .rename(columns={"F_VTA": "Fecha"})
   )
