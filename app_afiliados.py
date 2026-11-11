@@ -1619,7 +1619,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO COMPLETO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CORREGIDO TYPEERROR)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1710,7 +1710,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     asesor_op_sel = st.selectbox("Filtrar por Asesor:", asesores_disp, index=0, key="op_agt_filter")
 
   # -------------------------------------------------------------------------
-  # 2. FILTRADO DE DATASETS OPERATIVOS & NORMALIZACIÓN PARA CRUCE DE CALLS
+  # 2. FILTRADO DE DATASETS OPERATIVOS & CONVERSIÓN SEGURA DE LLAMADAS
   # -------------------------------------------------------------------------
   df_vta_op = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy()
 
@@ -1721,7 +1721,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     if "agente" in df_vta_op.columns:
       df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
 
-  # Normalización de llamadas cruzadas (Resuelve el problema de salida en ceros)
   if not df_calls.empty:
     col_fcall = next((c for c in df_calls.columns if str(c).upper() in ["F_CALL", "FECHA", "DATE"]), None)
     if col_fcall:
@@ -1736,12 +1735,10 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   else:
     df_calls_op = pd.DataFrame()
 
-  # Columna de valor de llamadas
   col_llamadas_val = None
   if not df_calls_op.empty:
     col_llamadas_val = next((c for c in df_calls_op.columns if str(c).strip().lower() in ["llamadas_val", "calls", "llamadas", "duracion"]), df_calls_op.columns[0])
 
-  # Identificación de columna PUNTOS en Ventas (Columna BO)
   col_bo_puntos = None
   for c in df_ventas.columns:
     if str(c).strip().upper() in ["BO", "PUNTOS", "PUNTO"]:
@@ -1751,33 +1748,38 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     col_bo_puntos = df_ventas.columns[66]
 
   # -------------------------------------------------------------------------
-  # 3. CÁLCULO DE KPIS OPERATIVOS Y RECUADROS SUPERIORES
+  # 3. CÁLCULO DE KPIS OPERATIVOS Y RECUADROS SUPERIORES (SAFE CONVERSION)
   # -------------------------------------------------------------------------
-  le_op_total = (df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in df_vta_op.columns else 0
-  tramites_op_total = len(df_vta_op)
-  llamadas_op_total = df_calls_op[col_llamadas_val].sum() if (not df_calls_op.empty and col_llamadas_val) else 0
+  le_op_total = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum()) if "ESTADO" in df_vta_op.columns else 0.0
+  tramites_op_total = float(len(df_vta_op))
+
+  # Solución al TypeError: conversión forzada a numérico flotante
+  if not df_calls_op.empty and col_llamadas_val and col_llamadas_val in df_calls_op.columns:
+    llamadas_op_total = float(pd.to_numeric(df_calls_op[col_llamadas_val], errors="coerce").fillna(0).sum())
+  else:
+    llamadas_op_total = 0.0
 
   if not df_dist_sub.empty:
     col_estado_dist = next((c for c in df_dist_sub.columns if str(c).strip().lower() in ["estado", "status"]), None)
     if col_estado_dist:
-      agt_activos_count = df_dist_sub[df_dist_sub[col_estado_dist].astype(str).str.upper() == "ACTIVO"].shape[0]
+      agt_activos_count = float(df_dist_sub[df_dist_sub[col_estado_dist].astype(str).str.upper() == "ACTIVO"].shape[0])
     else:
-      agt_activos_count = len(df_dist_sub)
+      agt_activos_count = float(len(df_dist_sub))
   else:
-    agt_activos_count = df_vta_op["agente"].nunique() if ("agente" in df_vta_op.columns and not df_vta_op.empty) else 1
+    agt_activos_count = float(df_vta_op["agente"].nunique()) if ("agente" in df_vta_op.columns and not df_vta_op.empty) else 1.0
 
-  agt_activos_count = max(1, agt_activos_count)
+  agt_activos_count = max(1.0, agt_activos_count)
 
   # Metas globales del equipo a ayer
-  meta_le_equipo_ayer = meta_le_ind_ayer * agt_activos_count
+  meta_le_equipo_ayer = float(meta_le_ind_ayer) * agt_activos_count
   desviacion_le_equipo = le_op_total - meta_le_equipo_ayer
   pct_cumplimiento_le_equipo = (le_op_total / meta_le_equipo_ayer * 100.0) if meta_le_equipo_ayer > 0 else 0.0
 
-  # Medias por asesor
+  # Medias por asesor (Operaciones 100% numéricas a prueba de error)
   media_tramites_asesor = tramites_op_total / agt_activos_count
   media_llamadas_asesor = llamadas_op_total / agt_activos_count
   media_leads_real_asesor = le_op_total / agt_activos_count
-  media_leads_esperada_asesor = meta_le_ind_ayer
+  media_leads_esperada_asesor = float(meta_le_ind_ayer)
   pct_cump_media_leads = (media_leads_real_asesor / media_leads_esperada_asesor * 100.0) if media_leads_esperada_asesor > 0 else 0.0
 
   # RECUADROS KPI SUPERIORES (FILA 1)
@@ -1786,7 +1788,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">LEADS EFECTIVOS (A AYER - DH {dia_corte_ayer})</div>
-        <div class="kpi-value">{le_op_total:,}</div>
+        <div class="kpi-value">{int(le_op_total):,}</div>
         <div class="kpi-subtext">Meta Equipo: <b>{meta_le_equipo_ayer:,.1f}</b></div>
         <div class="kpi-subtext">Desviación: <b style="color:{'#15803d' if desviacion_le_equipo >= 0 else '#b91c1c'};">{desviacion_le_equipo:+,.1f} ({pct_cumplimiento_le_equipo:.1f}%)</b></div>
     </div>
@@ -1817,7 +1819,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     <div class="kpi-card">
         <div class="kpi-title">% CUMP. MEDIA LEADS</div>
         <div class="kpi-value">{pct_cump_media_leads:.1f}%</div>
-        <div class="kpi-subtext">Asesores Activos: <b>{agt_activos_count}</b></div>
+        <div class="kpi-subtext">Asesores Activos: <b>{int(agt_activos_count)}</b></div>
         <div class="kpi-subtext">Filtro Supervisor: <b>{sup_sel}</b></div>
     </div>
     """, unsafe_allow_html=True)
@@ -1833,14 +1835,18 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     col_agente = "agente" if "agente" in df_sub.columns else ("asesor" if "asesor" in df_sub.columns else df_sub.columns[0])
     inicio_m_func = date(año_sel, mes_sel, 1)
 
-    # Pre-agrupamiento de llamadas normalizando nombres (Resuelve salida en cero)
     llamadas_dict = {}
     if not df_calls_sub.empty:
       col_agt_c = next((c for c in df_calls_sub.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), df_calls_sub.columns[0])
       col_val_c = next((c for c in df_calls_sub.columns if str(c).strip().lower() in ["llamadas_val", "calls", "llamadas", "duracion"]), df_calls_sub.columns[-1])
       for _, r_call in df_calls_sub.iterrows():
         k_agt = str(r_call[col_agt_c]).strip().upper()
-        llamadas_dict[k_agt] = llamadas_dict.get(k_agt, 0.0) + (float(r_call[col_val_c]) if pd.notna(r_call[col_val_c]) else 0.0)
+        v_c = r_call[col_val_c]
+        try:
+          val_call_num = float(v_c) if pd.notna(v_c) else 0.0
+        except (ValueError, TypeError):
+          val_call_num = 0.0
+        llamadas_dict[k_agt] = llamadas_dict.get(k_agt, 0.0) + val_call_num
 
     for agt, grp in df_sub.groupby(col_agente):
       agt_key = str(agt).strip().upper()
@@ -1853,23 +1859,20 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       is_eval = is_le & dec.isin(["A", "D", "P", "C"])
       is_no_eval = is_le & (dec.isin(["-", "NONE", "NAN", ""]) | bx_empty_series)
 
-      tram = len(grp)
-      le_v = is_le.sum()
-      no_cap = (grp["ESTADO"] == "LEAD NO CAPTURADO").sum() if "ESTADO" in grp.columns else 0
-      no_cond = (grp["ESTADO"] == "LEAD NO CONDICIONES").sum() if "ESTADO" in grp.columns else 0
-      otros = (~grp["ESTADO"].isin(["LEAD EFECTIVO", "LEAD NO CAPTURADO", "LEAD NO CONDICIONES", "", "NAN"])).sum() if "ESTADO" in grp.columns else 0
+      tram = float(len(grp))
+      le_v = float(is_le.sum())
+      no_cap = float((grp["ESTADO"] == "LEAD NO CAPTURADO").sum()) if "ESTADO" in grp.columns else 0.0
+      no_cond = float((grp["ESTADO"] == "LEAD NO CONDICIONES").sum()) if "ESTADO" in grp.columns else 0.0
+      otros = float((~grp["ESTADO"].isin(["LEAD EFECTIVO", "LEAD NO CAPTURADO", "LEAD NO CONDICIONES", "", "NAN"])).sum()) if "ESTADO" in grp.columns else 0.0
 
-      # Meta LE y % Cumplimiento LE por Asesor
-      meta_le_ind = meta_le_ind_mes
+      meta_le_ind = float(meta_le_ind_mes)
       pct_cump_le = (le_v / meta_le_ind) if meta_le_ind > 0 else 0.0
 
-      # AP MES
       if "F_DEC_EFF" in grp.columns and "DECISION" in grp.columns:
-        ap_m = (is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")).sum()
+        ap_m = float((is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")).sum())
       else:
-        ap_m = 0
+        ap_m = 0.0
 
-      # AP COSECHA
       if not df_vta_full.empty and "agente" in df_vta_full.columns and "F_DEC_EFF" in df_vta_full.columns:
         df_cos_agt = df_vta_full[
             (df_vta_full["agente"].astype(str).str.strip().str.upper() == agt_key) &
@@ -1878,19 +1881,18 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
             (pd.to_datetime(df_vta_full["F_VTA"]) < pd.Timestamp(inicio_m_func)) &
             (df_vta_full["DECISION"] == "A")
         ]
-        ap_cos = len(df_cos_agt)
+        ap_cos = float(len(df_cos_agt))
       else:
-        ap_cos = 0
+        ap_cos = 0.0
 
       ap_tot = ap_m + ap_cos
 
-      eval_v = is_eval.sum()
-      no_eval_v = is_no_eval.sum()
-      decl_v = (is_le & (dec == "D")).sum()
-      canc_v = (is_le & (dec == "C")).sum()
-      pend_v = (is_le & (dec == "P")).sum()
+      eval_v = float(is_eval.sum())
+      no_eval_v = float(is_no_eval.sum())
+      decl_v = float((is_le & (dec == "D")).sum())
+      canc_v = float((is_le & (dec == "C")).sum())
+      pend_v = float((is_le & (dec == "P")).sum())
 
-      # Llamadas Efectivas cruzadas
       llam_ef = llamadas_dict.get(agt_key, 0.0)
       cr_llam = (tram / llam_ef) if llam_ef > 0 else 0.0
 
@@ -1906,14 +1908,13 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
       pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
 
-      # Extracción de Puntos (Columna BO / Puntos)
       if col_bo_puntos and col_bo_puntos in grp.columns:
-        pts_val = pd.to_numeric(grp[col_bo_puntos], errors='coerce').sum()
+        pts_val = float(pd.to_numeric(grp[col_bo_puntos], errors='coerce').fillna(0).sum())
       else:
-        pts_val = float(ap_tot)  # Fallback a AP Totales si no existe la columna
+        pts_val = float(ap_tot)
 
       pct_cump_puntos = (pts_val / 11.0) if pts_val > 0 else 0.0
-      comision_cop_val = obtener_comision_cop(pts_val)
+      comision_cop_val = float(obtener_comision_cop(pts_val))
 
       records.append({
           "Asesor": agt,
@@ -1924,7 +1925,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           "LE": le_v,
           "% Cump LE": pct_cump_le,
           "CR / Llamadas": cr_llam,
-          "Desbordamiento / Llamadas": 0,
+          "Desbordamiento / Llamadas": 0.0,
           "% Desbordamiento": 0.0,
           "No Cap": no_cap,
           "No Cond": no_cond,
@@ -1969,7 +1970,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       tot_agt["Supervisor"] = "-"
       tot_agt["CR / Llamadas"] = (tot_agt["Trámites"] / tot_agt["Llamadas Efectivas"]) if tot_agt.get("Llamadas Efectivas", 0) > 0 else 0.0
       tot_agt["% Cump LE"] = (tot_agt["LE"] / tot_agt["Meta LE"]) if tot_agt.get("Meta LE", 0) > 0 else 0.0
-      tot_agt["Desbordamiento / Llamadas"] = 0
+      tot_agt["Desbordamiento / Llamadas"] = 0.0
       tot_agt["% Desbordamiento"] = 0.0
       tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
       tot_agt["% REM/RECH"] = (tot_agt["Otros"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
