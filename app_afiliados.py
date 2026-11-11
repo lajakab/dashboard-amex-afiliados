@@ -611,9 +611,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
   )
 
   df_final["AP Totales"] = df_final["AP MES"] + df_final["AP COSECHA"]
+  
+  # % AP DIA: Calculado como AP MES / Lead Efectivo (sin acumular ni incluir cosecha)
   df_final["% AP dia"] = np.where(
       df_final["Lead Efectivo"] > 0,
-      df_final["AP Totales"] / df_final["Lead Efectivo"],
+      df_final["AP MES"] / df_final["Lead Efectivo"],
       0,
   )
 
@@ -719,7 +721,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
       else 0
   )
   totales["% AP dia"] = (
-      totales["AP Totales"] / totales["Lead Efectivo"]
+      totales["AP MES"] / totales["Lead Efectivo"]
       if totales.get("Lead Efectivo", 0) > 0
       else 0
   )
