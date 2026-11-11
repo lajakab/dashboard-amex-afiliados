@@ -146,7 +146,6 @@ def render_gauge_svg(pct):
         </svg>
     </div>"""
 
-# Interpolación en 2 puntos (Blanco a Verde)
 def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
   if pd.isna(val) or vmin == vmax:
     return ""
@@ -157,7 +156,6 @@ def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
   b = int(rgb_low[2] + norm * (rgb_high[2] - rgb_low[2]))
   return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
 
-# Interpolación en 3 puntos con Naranja Intermedio
 def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
   if pd.isna(val) or vmin == vmax:
     return ""
@@ -198,6 +196,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   )
   st.sidebar.header("🔍 Filtros")
 
+  # DETECCIÓN DE COLUMNAS SEGÚN LA FÓRMULA EXACTA DE EXCEL
   col_fvta = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA VENTA", "F_VTA", "FECHA_VENTA", "FECHA VTA"]), 4)
   col_c_has_le = (len(df_ventas.columns) > 2 and (df_ventas.iloc[:, 2].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").any())
   col_estado = (2 if col_c_has_le else next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]), 7))
@@ -380,7 +379,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   ]
   df_vista = df_final[[c for c in columnas_vista if c in df_final.columns]].copy()
 
-  # Renombrado Compacto de Columnas para Ver Más Información sin Desplazamiento Extremo
+  # Renombrado de Columnas para Compactar la Tabla Principal Visualmente
   rename_dict = {
       "Lead Efectivo": "LE",
       "Meta Día Lead Efectivo": "Meta LE",
@@ -460,7 +459,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   meta_ap_mes_fecha = df_hasta_ap["Meta AP Mes"].sum()
   meta_ap_cos_fecha = df_hasta_ap["Meta AP Cosecha"].sum()
   meta_ap_tot_fecha = meta_ap_mes_fecha + meta_ap_cos_fecha
-
   meta_ap_mes_total = df_final["Meta AP Mes"].sum()
   meta_ap_cos_total = df_final["Meta AP Cosecha"].sum()
   meta_ap_tot_total = meta_ap_mes_total + meta_ap_cos_total
@@ -964,7 +962,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.plotly_chart(fig_dh, use_container_width=True)
 
     if vista_tabla_dh:
-      # Construcción de la matriz ordenada cronológicamente con indicadores de flecha y promedio histórico
+      piv_cols = ["Label_DH"]
+      for prefix in ["% AP", "APs", "LEs"]:
+          if (prefix == "% AP" and "% Conversión AP Mes Acumulada" in metricas_dh_sel) or \
+             (prefix == "APs" and "Aprobadas (AP MES) Acumuladas" in metricas_dh_sel) or \
+             (prefix == "LEs" and "Leads Efectivos Acumulados" in metricas_dh_sel):
+              for y_m, m_m in meses_tendencia:
+                  m_name = nombres_meses.get(m_m, str(m_m)).title()
+                  piv_cols.append(f"{prefix} ({m_name})")
+
       df_matrix = pd.DataFrame()
       df_matrix["Label_DH"] = df_dh_todos["Label_DH"].drop_duplicates().sort_values(key=lambda x: x.str.extract(r'(\d+)')[0].astype(int))
 
@@ -998,7 +1004,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                               avg_prev = sum(prev_vals) / len(prev_vals)
                               arrow = "⬆️" if val >= avg_prev else "⬇️"
                               color = "#15803d" if val >= avg_prev else "#b91c1c"
-                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{val:.2f}%</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {avg_prev:.2f}%</span></div>'
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.4;"><b>{val:.2f}%</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {avg_prev:.2f}%</span></div>'
                           else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{val:.2f}%</b></div>'
                       else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{val:.2f}%</div>'
                   else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
@@ -1012,7 +1018,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       st.markdown(f'<div style="overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">{html_table}</div>', unsafe_allow_html=True)
 
   # =========================================================================
-  # 🎯 DIAGNÓSTICO GERENCIAL DE MADURACIÓN & PROYECCIÓN (AJUSTADO & OPERATIVO)
+  # 🎯 DIAGNÓSTICO GERENCIAL DE MADURACIÓN & PROYECCIÓN (ACTUALIZADO)
   # =========================================================================
   df_dh_curr = (df_dh_todos[(df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] == mes_sel)] if "Mes" in df_dh_todos.columns and not df_dh_todos.empty else pd.DataFrame())
 
@@ -1024,12 +1030,10 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     ap_act_dh = int(ult_row_dh["AP_MES_Acum"])
     le_act_dh = int(ult_row_dh["LE_Acum"])
 
-    # 1. Comparación en el mismo día hábil para meses anteriores
     df_dh_prevs = df_dh_todos[(df_dh_todos["Día_Hábil"] == dh_act_num) & ((df_dh_todos["Año"] != año_sel) | (df_dh_todos["Mes"] != mes_sel))]
     prom_pct_prev_dh = (df_dh_prevs["%_AP_MES_Acum"].mean() if not df_dh_prevs.empty else 4.0)
     diff_vs_hist_dh = pct_act_dh - prom_pct_prev_dh
     
-    # Comparativa explícita contra el Mes Anterior en el mismo Día Hábil
     if len(meses_tendencia) > 1:
         y_prev, m_prev = meses_tendencia[-2]
         nombre_mes_anterior = nombres_meses.get(m_prev).title()
@@ -1037,14 +1041,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
         if not df_dh_mes_anterior.empty:
             pct_mes_anterior = df_dh_mes_anterior.iloc[0]["%_AP_MES_Acum"]
             ap_mes_anterior = int(df_dh_mes_anterior.iloc[0]["AP_MES_Acum"])
-            diff_ap_vs_prev = ap_act_dh - ap_mes_anterior
             diff_pct_prev = pct_act_dh - pct_mes_anterior
-            txt_comp_anterior = f"A la misma fecha del mes de <b>{nombre_mes_anterior} (DH {dh_act_num})</b>, se registraron <b>{ap_mes_anterior} APs ({pct_mes_anterior:.2f}%)</b>. Actualmente registramos <b>{ap_act_dh} APs ({pct_act_dh:.2f}%)</b>, lo que representa una variación de <b style='color:{'#15803d' if diff_ap_vs_prev >= 0 else '#b91c1c'};'>{diff_ap_vs_prev:+d} APs</b> y <b style='color:{'#15803d' if diff_pct_prev >= 0 else '#b91c1c'};'>{diff_pct_prev:+.2f}%</b>."
+            txt_comp_anterior = f"A la misma fecha del mes de {nombre_mes_anterior}, la conversión era del <b>{pct_mes_anterior:.2f}%</b> con <b>{ap_mes_anterior} APs</b>. Actualmente nos encontramos <b style='color:{'#15803d' if diff_pct_prev >= 0 else '#b91c1c'};'>{'por encima' if diff_pct_prev >= 0 else 'por debajo'}</b>, registrando <b>{pct_act_dh:.2f}%</b> y <b>{ap_act_dh} APs</b>."
         else: txt_comp_anterior = "No hay datos consolidados del mes anterior en este mismo día hábil."
     else: txt_comp_anterior = "Histórico mensual insuficiente para comparar."
 
-    # 2. CÁLCULO DE MADURACIÓN Y PROYECCIÓN REALISTA
-    # Evaluamos la ventana reciente de 3 a 4 días previos al último registro de aprobación
     dias_lag = 4
     fecha_inicio_maduracion = fecha_ult_ap_dt - timedelta(days=dias_lag)
     df_ventas_curr_m = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]
@@ -1053,14 +1054,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     volumen_leads_ventana = leads_en_ventana.shape[0]
     leads_pendientes_ventana = leads_en_ventana[leads_en_ventana["BX_EMPTY"] | (leads_en_ventana["DECISION"] == "P")].shape[0]
 
-    # Determinación del % de conversión real sobre los días que ya cerraron en el mes en curso
-    leads_cerrados = df_ventas_curr_m[(df_ventas_curr_m["ESTADO"] == "LEAD EFECTIVO") & (df_ventas_curr_m["F_VTA"] < fecha_inicio_maduracion)]
-    ap_cerradas = leads_cerrados[(pd.to_datetime(leads_cerrados["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(leads_cerrados["F_DEC_EFF"]).dt.month == mes_sel) & (leads_cerrados["DECISION"] == "A")].shape[0]
+    leads_maduros = df_ventas_curr_m[(df_ventas_curr_m["ESTADO"] == "LEAD EFECTIVO") & (df_ventas_curr_m["F_VTA"] < fecha_inicio_maduracion)]
+    ap_maduras = leads_maduros[(pd.to_datetime(leads_maduros["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(leads_maduros["F_DEC_EFF"]).dt.month == mes_sel) & (leads_maduros["DECISION"] == "A")].shape[0]
+    tasa_cierre_historica_mes_actual = (ap_maduras / leads_maduros.shape[0]) if leads_maduros.shape[0] > 0 else (prom_pct_prev_dh / 100.0)
     
-    tasa_cierre_real_mes_curso = (ap_cerradas / leads_cerrados.shape[0]) if leads_cerrados.shape[0] > 0 else (pct_act_dh / 100.0)
-    
-    # Proyección de APs adicionales en los días en maduración usando el % del mes en curso ya consolidado
-    ap_adicionales_estimadas = int(volumen_leads_ventana * tasa_cierre_real_mes_curso) 
+    ap_adicionales_estimadas = int(volumen_leads_ventana * tasa_cierre_historica_mes_actual) 
     aps_ya_caidas_ventana = leads_en_ventana[(pd.to_datetime(leads_en_ventana["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(leads_en_ventana["F_DEC_EFF"]).dt.month == mes_sel) & (leads_en_ventana["DECISION"] == "A")].shape[0]
     ap_remanentes = max(0, ap_adicionales_estimadas - aps_ya_caidas_ventana)
     
@@ -1087,23 +1085,20 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                     • <b>Comparativa Histórica en el mismo Día Hábil (DH {dh_act_num}):</b> El desempeño actual registra una variación de <b style="color:{'#15803d' if diff_vs_hist_dh >= 0 else '#b91c1c'}">{diff_vs_hist_dh:+.2f}%</b> frente al promedio de meses anteriores ({prom_pct_prev_dh:.2f}%).
                 </div>
                 <div class="causal-item">
-                    • <b>vs Mes Anterior:</b> {txt_comp_anterior}
+                    • <b>Comparativa vs Mes Anterior (DH {dh_act_num}):</b> {txt_comp_anterior}
                 </div>
                 <div class="causal-item">
                     • <b>Leads en Proceso de Maduración (Lag Operativo):</b> Existen <b>{leads_pendientes_ventana} Leads Efectivos</b> generados recientemente con estado no evaluado o pendiente.
                 </div>
                 <div class="causal-item">
-                    • <b>Proyección Incremental Estimada:</b> Con base en la tasa de conversión media acumulada de los días ya cerrados del mes en curso (<b>{(tasa_cierre_real_mes_curso*100):.2f}%</b>), se estiman <b>+{ap_remanentes} aprobaciones adicionales</b> sobre la venta reciente en proceso de maduración, elevando las ventas a <b>{ap_proyectadas_total_mes} AP MES</b> ({pct_proyectado_cierre:.2f}% AP Mes).
+                    • <b>Proyección Incremental Estimada:</b> Tomando como base la conversión media ya consolidada de los primeros días del mes actual (<b>{(tasa_cierre_historica_mes_actual*100):.1f}%</b>), se proyectan <b>+{ap_remanentes} aprobaciones adicionales</b> sobre las ventas recientes, lo que elevaría la cosecha a <b>{ap_proyectadas_total_mes} APs</b>, alcanzando una conversión proyectada del <b>{pct_proyectado_cierre:.2f}% AP Mes</b>.
                 </div>
                 <div style="background-color:#f8fafc; padding:10px 12px; border-radius:6px; margin-top:10px; font-size:12px; color:#334155; border-left:4px solid #15803d;">
                     <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">📌 Conclusión & Oportunidad de Mejora:</div>
-                    <div>La actual conversión del <b>{pct_act_dh:.2f}%</b> a corte del DH {dh_act_num} está fuertemente influenciada por el volumen sin dictaminar de la última semana. Con la regularización esperada de los <b>{leads_pendientes_ventana} trámites recientes</b>, proyectamos sumar <b>+{ap_remanentes} APs</b>, alcanzando <b>{ap_proyectadas_total_mes} AP MES</b> en total y elevando la tasa al <b>{pct_proyectado_cierre:.1f}% AP Mes</b>. Se debe trabajar en optimizar la calidad inicial del perfilamiento en piso para garantizar que la mesa de control reciba dictámenes de rápida validación, acortando los días de espera en las decisiones.</div>
+                    <div>La actual conversión del <b>{pct_act_dh:.2f}%</b> a corte del DH {dh_act_num} está fuertemente influenciada por el volumen sin dictaminar de la última semana. Con la regularización esperada de los {leads_pendientes_ventana} trámites recientes, sumadas a las {ap_act_dh} AP actuales, la tasa apuntará al <b>{pct_proyectado_cierre:.1f}%</b>. Se debe enfocar en optimizar la calidad inicial del perfilamiento en piso y asegurar la correcta carga documental para que la mesa de control reciba casos sólidos, acortando así los días de espera en las decisiones.</div>
                 </div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-else:
-  st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
