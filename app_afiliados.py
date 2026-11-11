@@ -199,13 +199,19 @@ def cargar_pestanas():
   def load_pq(name):
     try:
       return pd.read_parquet(name)
-    except:
+    except Exception:
       return pd.DataFrame()
+
+  df_c = load_pq("calls.parquet")
+  if df_c.empty:
+    df_c = load_pq("llamadas.parquet")
+
   return (
       load_pq("ventas.parquet"),
       load_pq("planta.parquet"),
       load_pq("seg_ppto.parquet"),
       load_pq("malla_día.parquet"),
+      df_c,
   )
 
 @st.cache_data
@@ -229,8 +235,20 @@ def cargar_distribucion():
       continue
   return pd.DataFrame()
 
-df_ventas, df_planta, df_ppto, df_malla = cargar_pestanas()
+df_ventas, df_planta, df_ppto, df_malla, df_calls = cargar_pestanas()
 df_distribucion = cargar_distribucion()
+
+# Preprocesamiento de llamadas
+if not df_calls.empty:
+  col_c_agt = next((c for c in df_calls.columns if str(c).strip().lower() in ["asesor", "agente", "c", "nombre"]), df_calls.columns[2] if len(df_calls.columns) > 2 else None)
+  col_c_val = next((c for c in df_calls.columns if str(c).strip().lower() in ["llamadas", "llamadas_efectivas", "e", "val", "calls"]), df_calls.columns[4] if len(df_calls.columns) > 4 else None)
+  col_c_f = next((c for c in df_calls.columns if str(c).strip().lower() in ["fecha", "f_llamada", "i", "fecha_llamada"]), df_calls.columns[8] if len(df_calls.columns) > 8 else None)
+  col_c_sup = next((c for c in df_calls.columns if str(c).strip().lower() in ["supervisor", "h"]), df_calls.columns[7] if len(df_calls.columns) > 7 else None)
+
+  df_calls["F_CALL"] = pd.to_datetime(df_calls[col_c_f], errors="coerce").dt.date if col_c_f else pd.NaT
+  df_calls["agente"] = df_calls[col_c_agt].astype(str).str.strip() if col_c_agt else ""
+  df_calls["Llamadas_Val"] = pd.to_numeric(df_calls[col_c_val], errors="coerce").fillna(1) if col_c_val else 1
+  df_calls["Supervisor"] = df_calls[col_c_sup].astype(str).str.strip() if col_c_sup else ""
 
 # =========================================================================
 # ⚙️ PREPROCESAMIENTO GLOBAL DE DF_VENTAS Y CRUCE CON DISTRIBUCIÓN
@@ -1655,10 +1673,20 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     if "agente" in df_vta_op.columns:
       df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
 
+  if not df_calls.empty and "F_CALL" in df_calls.columns:
+    df_calls_op = df_calls[(pd.to_datetime(df_calls["F_CALL"]).dt.year == año_sel) & (pd.to_datetime(df_calls["F_CALL"]).dt.month == mes_sel)].copy()
+    if sup_sel != "Todos" and "Supervisor" in df_calls_op.columns:
+      df_calls_op = df_calls_op[df_calls_op["Supervisor"] == sup_sel]
+    if asesor_op_sel != "Todos" and "agente" in df_calls_op.columns:
+      df_calls_op = df_calls_op[df_calls_op["agente"] == asesor_op_sel]
+  else:
+    df_calls_op = pd.DataFrame()
+
   # 3. Cálculo de KPIs Operativos Generales
   le_op_total = (df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in df_vta_op.columns else 0
   tramites_op_total = len(df_vta_op)
-  
+  llamadas_op_total = df_calls_op["Llamadas_Val"].sum() if (not df_calls_op.empty and "Llamadas_Val" in df_calls_op.columns) else 0
+
   if "DECISION" in df_vta_op.columns and "F_DEC_EFF" in df_vta_op.columns:
     ap_mes_op_total = df_vta_op[(pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.month == mes_sel) & (df_vta_op["DECISION"] == "A")].shape[0]
   else:
@@ -1677,7 +1705,8 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     ap_cos_op_total = 0
 
   ap_tot_op = ap_mes_op_total + ap_cos_op_total
-  pct_ap_op = (ap_mes_op_total / le_op_total * 100.0) if le_op_total > 0 else 0.0
+  pct_ap_mes_op = (ap_mes_op_total / le_op_total * 100.0) if le_op_total > 0 else 0.0
+  pct_ap_tot_op = (ap_tot_op / le_op_total * 100.0) if le_op_total > 0 else 0.0
 
   if not df_dist_sub.empty:
     col_estado_dist = next((c for c in df_dist_sub.columns if str(c).strip().lower() in ["estado", "status"]), None)
@@ -1690,14 +1719,14 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
   col_okpi1, col_okpi2, col_okpi3, col_okpi4 = st.columns(4)
   with col_okpi1:
-    pct_conv_le = (le_op_total / tramites_op_total * 100.0) if tramites_op_total > 0 else 0.0
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Leads Efectivos Operación</div><div class="kpi-value">{le_op_total:,}</div><div class="kpi-subtext">Trámites Totales: <b>{tramites_op_total:,}</b></div><div class="kpi-subtext">% Conversión LE: <b>{pct_conv_le:.1f}%</b></div></div>""", unsafe_allow_html=True)
+    cr_llamadas_gen = (tramites_op_total / llamadas_op_total * 100.0) if llamadas_op_total > 0 else 0.0
+    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Trámites & Llamadas</div><div class="kpi-value">{tramites_op_total:,}</div><div class="kpi-subtext">Llamadas Efectivas: <b>{int(llamadas_op_total):,}</b></div><div class="kpi-subtext">CR / Llamadas: <b>{cr_llamadas_gen:.1f}%</b></div></div>""", unsafe_allow_html=True)
 
   with col_okpi2:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP MES Operación</div><div class="kpi-value">{ap_mes_op_total:,}</div><div class="kpi-subtext">Tasa Aprobación Mes: <b>{pct_ap_op:.2f}%</b></div><div class="kpi-subtext">Objetivo: <b>4.5%</b></div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP MES Operación</div><div class="kpi-value">{ap_mes_op_total:,}</div><div class="kpi-subtext">% AP Mes: <b>{pct_ap_mes_op:.2f}%</b></div><div class="kpi-subtext">LE Operación: <b>{le_op_total:,}</b></div></div>""", unsafe_allow_html=True)
 
   with col_okpi3:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP Totales (Mes + Cosecha)</div><div class="kpi-value">{ap_tot_op:,}</div><div class="kpi-subtext">AP Cosecha: <b>{ap_cos_op_total:,}</b></div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP Totales (Mes + Cosecha)</div><div class="kpi-value">{ap_tot_op:,}</div><div class="kpi-subtext">AP Cosecha: <b>{ap_cos_op_total:,}</b></div><div class="kpi-subtext">% AP Total: <b>{pct_ap_tot_op:.2f}%</b></div></div>""", unsafe_allow_html=True)
 
   with col_okpi4:
     st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Equipo Operativo</div><div class="kpi-value">{agt_activos_count}</div><div class="kpi-subtext">Supervisor Filtro: <b>{sup_sel}</b></div></div>""", unsafe_allow_html=True)
@@ -1705,18 +1734,21 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.divider()
   st.subheader("📋 Matriz Comparativa Operativa por Asesor")
 
-  # 4. Construcción de la Tabla Agregada por Asesor
-  def agrupar_por_asesor(df_sub):
+  # 4. Agrupación por Asesor con Métricas de Llamadas, Maduración y No Evaluados
+  def agrupar_por_asesor_completo(df_sub, df_vta_full, df_calls_sub):
     records = []
     col_agente = "agente" if "agente" in df_sub.columns else ("asesor" if "asesor" in df_sub.columns else df_sub.columns[0])
-    
+    inicio_m_func = date(año_sel, mes_sel, 1)
+
     for agt, grp in df_sub.groupby(col_agente):
       sup_agt = grp["Supervisor"].iloc[0] if "Supervisor" in grp.columns and pd.notna(grp["Supervisor"].iloc[0]) else "Sin Supervisor"
+      
       is_le = grp["ESTADO"] == "LEAD EFECTIVO" if "ESTADO" in grp.columns else pd.Series(True, index=grp.index)
       dec = grp["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in grp.columns else pd.Series("", index=grp.index)
-      is_eval = is_le & dec.isin(["A", "D", "P", "C"])
       bx_empty_series = grp["BX_EMPTY"] if "BX_EMPTY" in grp.columns else pd.Series(False, index=grp.index)
-      is_no_gest = is_le & bx_empty_series
+
+      is_eval = is_le & dec.isin(["A", "D", "P", "C"])
+      is_no_eval = is_le & (dec.isin(["-", "NONE", "NAN", ""]) | bx_empty_series)
 
       tram = len(grp)
       le_v = is_le.sum()
@@ -1724,78 +1756,146 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       no_cond = (grp["ESTADO"] == "LEAD NO CONDICIONES").sum() if "ESTADO" in grp.columns else 0
       otros = (~grp["ESTADO"].isin(["LEAD EFECTIVO", "LEAD NO CAPTURADO", "LEAD NO CONDICIONES", "", "NAN"])).sum() if "ESTADO" in grp.columns else 0
 
+      # AP MES
       if "F_DEC_EFF" in grp.columns and "DECISION" in grp.columns:
         ap_m = (is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")).sum()
       else:
         ap_m = 0
 
+      # AP COSECHA
+      if not df_vta_full.empty and "agente" in df_vta_full.columns and "F_DEC_EFF" in df_vta_full.columns:
+        df_cos_agt = df_vta_full[
+            (df_vta_full["agente"] == agt) &
+            (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.year == año_sel) &
+            (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.month == mes_sel) &
+            (pd.to_datetime(df_vta_full["F_VTA"]) < pd.Timestamp(inicio_m_func)) &
+            (df_vta_full["DECISION"] == "A")
+        ]
+        ap_cos = len(df_cos_agt)
+      else:
+        ap_cos = 0
+
+      ap_tot = ap_m + ap_cos
+
       eval_v = is_eval.sum()
-      nogest_v = is_no_gest.sum()
+      no_eval_v = is_no_eval.sum()
       decl_v = (is_le & (dec == "D")).sum()
       canc_v = (is_le & (dec == "C")).sum()
       pend_v = (is_le & (dec == "P")).sum()
 
-      pct_le = (le_v / tram * 100.0) if tram > 0 else 0.0
-      pct_rem = (otros / tram * 100.0) if tram > 0 else 0.0
-      pct_ap_m = (ap_m / le_v * 100.0) if le_v > 0 else 0.0
-      pct_eval = (eval_v / le_v * 100.0) if le_v > 0 else 0.0
-      pct_decl = (decl_v / le_v * 100.0) if le_v > 0 else 0.0
-      pct_canc = (canc_v / le_v * 100.0) if le_v > 0 else 0.0
-      pct_pend = (pend_v / le_v * 100.0) if le_v > 0 else 0.0
+      # Llamadas Efectivas
+      if not df_calls_sub.empty and "agente" in df_calls_sub.columns:
+        llam_ef = df_calls_sub[df_calls_sub["agente"] == agt]["Llamadas_Val"].sum()
+      else:
+        llam_ef = 0
+
+      cr_llam = (tram / llam_ef) if llam_ef > 0 else 0.0
+
+      pct_le = (le_v / tram) if tram > 0 else 0.0
+      pct_rem = (otros / tram) if tram > 0 else 0.0
+
+      pct_ap_m = (ap_m / le_v) if le_v > 0 else 0.0
+      pct_ap_tot = (ap_tot / le_v) if le_v > 0 else 0.0
+
+      pct_eval = (eval_v / le_v) if le_v > 0 else 0.0
+      pct_no_eval = (no_eval_v / le_v) if le_v > 0 else 0.0
+      pct_decl = (decl_v / le_v) if le_v > 0 else 0.0
+      pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
+      pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
 
       records.append({
           "Asesor": agt,
           "Supervisor": sup_agt,
+          "Llamadas Efectivas": llam_ef,
           "Trámites": tram,
+          "CR / Llamadas": cr_llam,
+          "Desbordamiento / Llamadas": 0,
+          "% Desbordamiento": 0.0,
           "LE": le_v,
           "No Cap": no_cap,
           "No Cond": no_cond,
           "Otros": otros,
-          "% LE": pct_le / 100.0,
-          "% REM/RECH": pct_rem / 100.0,
+          "% LE": pct_le,
+          "% REM/RECH": pct_rem,
           "AP Mes": ap_m,
-          "% AP Mes": pct_ap_m / 100.0,
+          "AP Cosecha": ap_cos,
+          "Total AP": ap_tot,
+          "% AP Mes": pct_ap_m,
+          "% AP Total": pct_ap_tot,
           "Eval": eval_v,
-          "% Eval": pct_eval / 100.0,
-          "No Gest": nogest_v,
+          "% Eval": pct_eval,
+          "No Evaluado": no_eval_v,
+          "% No Evaluado": pct_no_eval,
           "Decl": decl_v,
-          "% Decl": pct_decl / 100.0,
+          "% Decl": pct_decl,
           "Canc": canc_v,
-          "% Canc": pct_canc / 100.0,
+          "% Canc": pct_canc,
           "Pend": pend_v,
-          "% Pend": pct_pend / 100.0
+          "% Pend": pct_pend
       })
     return pd.DataFrame(records)
 
   if not df_vta_op.empty:
-    df_matriz_agt = agrupar_por_asesor(df_vta_op)
+    df_matriz_agt = agrupar_por_asesor_completo(df_vta_op, df_ventas, df_calls_op)
 
-    # Fila de Totales Generales
-    tot_agt = df_matriz_agt.sum(numeric_only=True).to_dict()
-    tot_agt["Asesor"] = "TOTAL GENERAL"
-    tot_agt["Supervisor"] = "-"
-    tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
-    tot_agt["% REM/RECH"] = (tot_agt["Otros"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
-    tot_agt["% AP Mes"] = (tot_agt["AP Mes"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-    tot_agt["% Eval"] = (tot_agt["Eval"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-    tot_agt["% Decl"] = (tot_agt["Decl"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-    tot_agt["% Canc"] = (tot_agt["Canc"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-    tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    if not df_matriz_agt.empty:
+      media_llamadas_op = df_matriz_agt["Llamadas Efectivas"].mean()
+      df_matriz_agt["Desbordamiento / Llamadas"] = df_matriz_agt["Llamadas Efectivas"] - media_llamadas_op
+      df_matriz_agt["% Desbordamiento"] = np.where(
+          df_matriz_agt["Llamadas Efectivas"] > 0,
+          df_matriz_agt["Desbordamiento / Llamadas"] / df_matriz_agt["Llamadas Efectivas"],
+          0.0
+      )
 
-    df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)
+      tot_agt = df_matriz_agt.sum(numeric_only=True).to_dict()
+      tot_agt["Asesor"] = "TOTAL GENERAL"
+      tot_agt["Supervisor"] = "-"
+      tot_agt["CR / Llamadas"] = (tot_agt["Trámites"] / tot_agt["Llamadas Efectivas"]) if tot_agt.get("Llamadas Efectivas", 0) > 0 else 0.0
+      tot_agt["Desbordamiento / Llamadas"] = 0
+      tot_agt["% Desbordamiento"] = 0.0
+      tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
+      tot_agt["% REM/RECH"] = (tot_agt["Otros"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
+      tot_agt["% AP Mes"] = (tot_agt["AP Mes"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% AP Total"] = (tot_agt["Total AP"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% Eval"] = (tot_agt["Eval"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% No Evaluado"] = (tot_agt["No Evaluado"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% Decl"] = (tot_agt["Decl"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% Canc"] = (tot_agt["Canc"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
 
-    format_agt_dict = {
-        "Trámites": "{:,.0f}", "LE": "{:,.0f}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
-        "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "% AP Mes": "{:.1%}",
-        "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Gest": "{:,.0f}", "Decl": "{:,.0f}", "% Decl": "{:.1%}",
-        "Canc": "{:,.0f}", "% Canc": "{:.1%}", "Pend": "{:,.0f}", "% Pend": "{:.1%}"
-    }
+      cols_orden = [
+          "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "CR / Llamadas",
+          "Desbordamiento / Llamadas", "% Desbordamiento", "LE", "No Cap", "No Cond",
+          "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes",
+          "% AP Total", "Eval", "% Eval", "No Evaluado", "% No Evaluado", "Decl", "% Decl",
+          "Canc", "% Canc", "Pend", "% Pend"
+      ]
 
-    styler_agt = (
-        df_matriz_agt.style.format(format_agt_dict)
-        .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
-    )
+      df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)[cols_orden]
 
-    st.dataframe(styler_agt, use_container_width=True, height=650, hide_index=True)
+      format_agt_dict = {
+          "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "CR / Llamadas": "{:.1%}",
+          "Desbordamiento / Llamadas": "{:+,.0f}", "% Desbordamiento": "{:+.1%}",
+          "LE": "{:,.0f}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
+          "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "AP Cosecha": "{:,.0f}",
+          "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
+          "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}", "% No Evaluado": "{:.1%}",
+          "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}", "% Canc": "{:.1%}",
+          "Pend": "{:,.0f}", "% Pend": "{:.1%}"
+      }
+
+      def resaltar_desbordamiento(val):
+        if not isinstance(val, (int, float, np.number)): return ""
+        if val > 0: return "background-color: #dcfce7; color: #15803d; font-weight: bold;"
+        if val < 0: return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
+        return ""
+
+      styler_agt = (
+          df_matriz_agt.style.format(format_agt_dict)
+          .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+          .map(resaltar_desbordamiento, subset=["Desbordamiento / Llamadas", "% Desbordamiento"])
+      )
+
+      st.dataframe(styler_agt, use_container_width=True, height=680, hide_index=True)
   else:
     st.info("ℹ️ No se encontraron registros de ventas para el filtro operativo seleccionado.")
