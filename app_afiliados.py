@@ -88,6 +88,25 @@ st.markdown(
         padding-bottom: 8px;
         margin-bottom: 12px;
     }
+
+    /* Ficha Gerencial Diferenciada para Funnel */
+    .diag-box-funnel {
+        background-color: #f8fafc;
+        border: 1.5px solid #6366f1;
+        border-radius: 10px;
+        padding: 16px 20px;
+        box-shadow: 0 4px 8px -1px rgba(99, 102, 241, 0.1);
+        margin-top: 15px;
+    }
+    .diag-header-funnel {
+        font-size: 15px;
+        font-weight: 800;
+        color: #312e81;
+        border-bottom: 2px solid #c7d2fe;
+        padding-bottom: 8px;
+        margin-bottom: 12px;
+    }
+
     .arrow-badge-up {
         background-color: #dcfce7;
         color: #15803d;
@@ -272,12 +291,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   dias_nombres_map = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado"}
   df_cal["Nombre_Día"] = df_cal["Día_Semana"].map(dias_nombres_map)
 
-  # ETIQUETADO Y FILTRO DE DÍA HÁBIL (DH) EN SIDEBAR
+  # ETIQUETADO DE DÍA HÁBIL (DH)
   df_cal["Día_Hábil"] = [f"DH {i}" for i in range(1, len(df_cal) + 1)]
   dias_habiles_disp = df_cal["Día_Hábil"].tolist()
-  dias_habiles_sel = st.sidebar.multiselect("Día Hábil (DH)", options=dias_habiles_disp, default=[])
-  if dias_habiles_sel:
-    df_cal = df_cal[df_cal["Día_Hábil"].isin(dias_habiles_sel)]
 
   dias_semana_sel = st.sidebar.multiselect("Día de la Semana", options=list(dias_nombres_map.values()), default=[])
   if dias_semana_sel:
@@ -578,7 +594,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   rgb_red = (248, 140, 140)
   rgb_white = (255, 255, 255)
 
-  # CÁLCULO DE VMIN Y VMAX DIRECTAMENTE SOBRE DF_VISTA HASTA FECHA_CORTE
   mask_hasta_corte = df_final["Fecha"] <= fecha_corte
   df_vista_pasado = df_vista.iloc[:len(df_final)][mask_hasta_corte]
 
@@ -597,7 +612,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       vmin, vmax = 0, 1
     min_max_dict[col] = (vmin, vmax)
 
-  # FORMATO CONDICIONAL CORREGIDO Y AJUSTADO SEGÚN ESPECIFICACIÓN EXACTA
+  # FORMATO CONDICIONAL PARA LA TABLA INICIAL GENERAL
   def aplicar_formatos_condicionales(df_input):
     styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
     for idx, row in df_input.iterrows():
@@ -625,7 +640,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                 bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
                 if bg: cell_style += " " + bg
             elif col in ["% LE", "Prom"]:
-              # Verde (alto) -> Naranja -> Rojo (bajo)
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
@@ -916,7 +930,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   st.plotly_chart(fig_tend, use_container_width=True)
 
   # =========================================================================
-  # 🗓️ MÓDULO ACTUALIZADO: ANÁLISIS POR DÍA HÁBIL & PROYECCIÓN DE MADURACIÓN
+  # 🗓️ MÓDULO 1: ANÁLISIS POR DÍA HÁBIL & PROYECCIÓN DE MADURACIÓN AP MES
   # =========================================================================
   st.divider()
   st.subheader("🗓️ Análisis por Día Hábil & Proyección de Maduración AP Mes")
@@ -957,8 +971,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     df_m_dh = generar_serie_dia_habil(y_m, m_m, df_ventas)
     if not df_m_dh.empty: df_dh_todos = pd.concat([df_dh_todos, df_m_dh], ignore_index=True)
 
-  # FILTROS DE INDICADORES Y MESES INDEPENDIENTES
-  col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.5, 1])
+  # FILTROS DE INDICADORES, DÍAS HÁBILES Y MESES
+  col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns([1.3, 1.3, 1.2, 1.0])
   with col_ctrl1:
     metricas_dh_sel = st.multiselect(
         "Filtro de Indicadores:",
@@ -974,16 +988,22 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     )
     meses_tendencia_filtrados = [opciones_meses_dh[k] for k in meses_dh_nombres_sel if k in opciones_meses_dh]
   with col_ctrl3:
+    dh_lista_disp = sorted(df_dh_todos["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', x).group())) if not df_dh_todos.empty else []
+    dh_filtro_m1 = st.multiselect("Filtrar Día Hábil (DH):", options=dh_lista_disp, default=[])
+  with col_ctrl4:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    # MATRIZ COMPARATIVA SELECCIONADA INICIALMENTE POR DEFECTO (value=True)
     vista_tabla_dh = st.checkbox("Mostrar Matriz Comparativa", value=True)
 
-  if not df_dh_todos.empty and meses_tendencia_filtrados:
+  df_dh_todos_plot = df_dh_todos.copy()
+  if dh_filtro_m1:
+    df_dh_todos_plot = df_dh_todos_plot[df_dh_todos_plot["Label_DH"].isin(dh_filtro_m1)]
+
+  if not df_dh_todos_plot.empty and meses_tendencia_filtrados:
     fig_dh = make_subplots(specs=[[{"secondary_y": True}]])
     colores_dh = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
 
     for idx, (y_m, m_m) in enumerate(meses_tendencia_filtrados):
-      sub_dh = df_dh_todos[(df_dh_todos["Año"] == y_m) & (df_dh_todos["Mes"] == m_m)]
+      sub_dh = df_dh_todos_plot[(df_dh_todos_plot["Año"] == y_m) & (df_dh_todos_plot["Mes"] == m_m)]
       if sub_dh.empty: continue
       nombre_m_str = nombres_meses.get(m_m, str(m_m)).title()
       c_base = colores_dh[idx % len(colores_dh)]
@@ -1005,13 +1025,13 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.plotly_chart(fig_dh, use_container_width=True)
 
     if vista_tabla_dh:
-      # Construcción de la matriz ordenada cronológicamente con indicadores dobles (PROMEDIO + VS MES ANTERIOR)
+      # Matriz comparativa por Día Hábil en APs
       df_matrix = pd.DataFrame()
-      df_matrix["Label_DH"] = df_dh_todos["Label_DH"].drop_duplicates().sort_values(key=lambda x: x.str.extract(r'(\d+)')[0].astype(int))
+      df_matrix["Label_DH"] = df_dh_todos_plot["Label_DH"].drop_duplicates().sort_values(key=lambda x: int(re.search(r'\d+', str(x)).group()))
 
       for y_m, m_m in meses_tendencia_filtrados:
           m_name = nombres_meses.get(m_m, str(m_m)).title()
-          sub_df = df_dh_todos[(df_dh_todos["Año"] == y_m) & (df_dh_todos["Mes"] == m_m)]
+          sub_df = df_dh_todos_plot[(df_dh_todos_plot["Año"] == y_m) & (df_dh_todos_plot["Mes"] == m_m)]
           mapping_ap_pct = dict(zip(sub_df["Label_DH"], sub_df["%_AP_MES_Acum"]))
           mapping_ap_vol = dict(zip(sub_df["Label_DH"], sub_df["AP_MES_Acum"]))
           mapping_le_vol = dict(zip(sub_df["Label_DH"], sub_df["LE_Acum"]))
@@ -1026,7 +1046,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       curr_col_ap = f"APs ({curr_m_name})"
       curr_col_le = f"LEs ({curr_m_name})"
 
-      # Identificar el mes inmediatamente anterior para la comparación directa
       idx_curr_m = [i for i, (y, m) in enumerate(meses_tendencia) if y == año_sel and m == mes_sel]
       if idx_curr_m and idx_curr_m[0] > 0:
           prev_m_tuple = meses_tendencia[idx_curr_m[0] - 1]
@@ -1132,7 +1151,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       st.markdown(f'<div style="overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">{html_table}</div>', unsafe_allow_html=True)
 
   # =========================================================================
-  # 🎯 DIAGNÓSTICO GERENCIAL DE MADURACIÓN & PROYECCIÓN (AJUSTADO & OPERATIVO)
+  # 🎯 DIAGNÓSTICO GERENCIAL DE MADURACIÓN & PROYECCIÓN
   # =========================================================================
   df_dh_curr = (df_dh_todos[(df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] == mes_sel)] if "Mes" in df_dh_todos.columns and not df_dh_todos.empty else pd.DataFrame())
 
@@ -1144,12 +1163,10 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     ap_act_dh = int(ult_row_dh["AP_MES_Acum"])
     le_act_dh = int(ult_row_dh["LE_Acum"])
 
-    # 1. Comparación en el mismo día hábil para meses anteriores
     df_dh_prevs = df_dh_todos[(df_dh_todos["Día_Hábil"] == dh_act_num) & ((df_dh_todos["Año"] != año_sel) | (df_dh_todos["Mes"] != mes_sel))]
     prom_pct_prev_dh = (df_dh_prevs["%_AP_MES_Acum"].mean() if not df_dh_prevs.empty else 4.0)
     diff_vs_hist_dh = pct_act_dh - prom_pct_prev_dh
     
-    # Comparativa explícita contra el Mes Anterior en el mismo Día Hábil
     if len(meses_tendencia) > 1:
         y_prev, m_prev = meses_tendencia[-2]
         nombre_mes_anterior = nombres_meses.get(m_prev).title()
@@ -1163,7 +1180,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
         else: txt_comp_anterior = "No hay datos consolidados del mes anterior en este mismo día hábil."
     else: txt_comp_anterior = "Histórico mensual insuficiente para comparar."
 
-    # 2. CÁLCULO DE MADURACIÓN Y PROYECCIÓN REALISTA
     dias_lag = 4
     fecha_inicio_maduracion = fecha_ult_ap_dt - timedelta(days=dias_lag)
     df_ventas_curr_m = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]
@@ -1172,13 +1188,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     volumen_leads_ventana = leads_en_ventana.shape[0]
     leads_pendientes_ventana = leads_en_ventana[leads_en_ventana["BX_EMPTY"] | (leads_en_ventana["DECISION"] == "P")].shape[0]
 
-    # Determinación del % de conversión real sobre los días que ya cerraron en el mes en curso
     leads_cerrados = df_ventas_curr_m[(df_ventas_curr_m["ESTADO"] == "LEAD EFECTIVO") & (df_ventas_curr_m["F_VTA"] < fecha_inicio_maduracion)]
     ap_cerradas = leads_cerrados[(pd.to_datetime(leads_cerrados["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(leads_cerrados["F_DEC_EFF"]).dt.month == mes_sel) & (leads_cerrados["DECISION"] == "A")].shape[0]
     
     tasa_cierre_real_mes_curso = (ap_cerradas / leads_cerrados.shape[0]) if leads_cerrados.shape[0] > 0 else (pct_act_dh / 100.0)
     
-    # Proyección de APs adicionales en los días en maduración usando el % del mes en curso ya consolidado
     ap_adicionales_estimadas = int(volumen_leads_ventana * tasa_cierre_real_mes_curso) 
     aps_ya_caidas_ventana = leads_en_ventana[(pd.to_datetime(leads_en_ventana["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(leads_en_ventana["F_DEC_EFF"]).dt.month == mes_sel) & (leads_en_ventana["DECISION"] == "A")].shape[0]
     ap_remanentes = max(0, ap_adicionales_estimadas - aps_ya_caidas_ventana)
@@ -1223,6 +1237,278 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
         """,
         unsafe_allow_html=True,
     )
+
+  # =========================================================================
+  # 🔄 NUEVO MÓDULO: ANÁLISIS DE FUNNEL & ESTADO DE LEADS POR DÍA HÁBIL
+  # =========================================================================
+  st.divider()
+  st.subheader("🔄 Análisis de Funnel & Estado de Leads por Día Hábil (ÚLTIMOS 4 MESES)")
+
+  def generar_funnel_dia_habil(y, m, df_v):
+    num_dias_m = calendar.monthrange(y, m)[1]
+    festivos = holidays.Mexico(years=y)
+    fechas = [date(y, m, d) for d in range(1, num_dias_m + 1)]
+    dias_habiles = [f for f in fechas if f.weekday() != 6 and f not in festivos]
+
+    df_v_mes = df_v[(pd.to_datetime(df_v["F_VTA"]).dt.year == y) & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)]
+    es_mes_actual_flag = (y == año_sel) and (m == mes_sel)
+
+    if es_mes_actual_flag:
+      df_ap_curr = df_v_mes[(pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.year == y) & (pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.month == m) & (df_v_mes["DECISION"] == "A")]
+      if not df_ap_curr.empty: max_f_ap = pd.to_datetime(df_ap_curr["F_VTA"]).dt.date.max()
+      else: max_f_ap = date.today()
+    else: max_f_ap = date(y, m, num_dias_m)
+
+    records = []
+    le_acum, eval_acum, decl_acum, nogest_acum, canc_acum = 0, 0, 0, 0, 0
+    for dh_idx, f in enumerate(dias_habiles, start=1):
+      if es_mes_actual_flag and f > max_f_ap: break
+
+      sub_f = df_v_mes[df_v_mes["F_VTA"] == f]
+      is_le = sub_f["ESTADO"] == "LEAD EFECTIVO"
+      dec = sub_f["DECISION"].astype(str).str.strip().str.upper()
+
+      le_dia = is_le.sum()
+      eval_dia = (is_le & dec.isin(["A", "D", "P", "C"])).sum()
+      decl_dia = (is_le & (dec == "D")).sum()
+      nogest_dia = (is_le & sub_f["BX_EMPTY"]).sum()
+      canc_dia = (is_le & (dec == "C")).sum()
+
+      le_acum += le_dia
+      eval_acum += eval_dia
+      decl_acum += decl_dia
+      nogest_acum += nogest_dia
+      canc_acum += canc_dia
+
+      pct_eval = (eval_acum / le_acum * 100.0) if le_acum > 0 else 0.0
+      pct_decl = (decl_acum / le_acum * 100.0) if le_acum > 0 else 0.0
+      pct_nogest = (nogest_acum / le_acum * 100.0) if le_acum > 0 else 0.0
+      pct_canc = (canc_acum / le_acum * 100.0) if le_acum > 0 else 0.0
+
+      records.append({
+          "Año": y, "Mes": m, "Fecha": f, "Día_Hábil": dh_idx, "Label_DH": f"DH {dh_idx}",
+          "LE_Acum": le_acum,
+          "Eval_Acum": eval_acum,
+          "%_Eval_Acum": round(pct_eval, 2),
+          "Decl_Acum": decl_acum,
+          "%_Decl_Acum": round(pct_decl, 2),
+          "NoGest_Acum": nogest_acum,
+          "%_NoGest_Acum": round(pct_nogest, 2),
+          "Canc_Acum": canc_acum,
+          "%_Canc_Acum": round(pct_canc, 2)
+      })
+    return pd.DataFrame(records)
+
+  df_dh_funnel = pd.DataFrame()
+  for y_m, m_m in meses_tendencia:
+    df_m_fun = generar_funnel_dia_habil(y_m, m_m, df_ventas)
+    if not df_m_fun.empty: df_dh_funnel = pd.concat([df_dh_funnel, df_m_fun], ignore_index=True)
+
+  metricas_funnel_map = {
+      "Leads Efectivos": ("LE_Acum", "vol"),
+      "Evaluados": ("Eval_Acum", "vol"),
+      "% Evaluado": ("%_Eval_Acum", "pct"),
+      "Declinados": ("Decl_Acum", "vol"),
+      "% Declinado": ("%_Decl_Acum", "pct"),
+      "No Gestionados": ("NoGest_Acum", "vol"),
+      "% No Gestionado": ("%_NoGest_Acum", "pct"),
+      "Cancelados": ("Canc_Acum", "vol"),
+      "% Cancelado": ("%_Canc_Acum", "pct"),
+  }
+
+  col_f1, col_f2, col_f3, col_f4 = st.columns([1.5, 1.3, 1.2, 1.0])
+  with col_f1:
+    met_funnel_sel = st.multiselect(
+        "Filtro de Métricas de Funnel:",
+        options=list(metricas_funnel_map.keys()),
+        default=["Leads Efectivos", "% Evaluado", "% Declinado", "% No Gestionado"]
+    )
+  with col_f2:
+    opciones_meses_fun = {f"{nombres_meses.get(m, str(m)).title()} ({y})": (y, m) for y, m in meses_tendencia}
+    meses_fun_sel = st.multiselect(
+        "Meses a Comparar (Funnel):",
+        options=list(opciones_meses_fun.keys()),
+        default=list(opciones_meses_fun.keys())
+    )
+    meses_fun_filtrados = [opciones_meses_fun[k] for k in meses_fun_sel if k in opciones_meses_fun]
+  with col_f3:
+    dh_lista_fun_disp = sorted(df_dh_funnel["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', x).group())) if not df_dh_funnel.empty else []
+    dh_filtro_funnel = st.multiselect("Filtrar Día Hábil (DH):", options=dh_lista_fun_disp, default=[], key="dh_funnel_select")
+  with col_f4:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    vista_matriz_funnel = st.checkbox("Mostrar Matriz Comparativa Funnel", value=True)
+
+  df_dh_funnel_plot = df_dh_funnel.copy()
+  if dh_filtro_funnel:
+    df_dh_funnel_plot = df_dh_funnel_plot[df_dh_funnel_plot["Label_DH"].isin(dh_filtro_funnel)]
+
+  if not df_dh_funnel_plot.empty and meses_fun_filtrados:
+    # 1. Gráfico de Tendencia por Día Hábil
+    fig_fun = make_subplots(specs=[[{"secondary_y": True}]])
+    colores_fun = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
+
+    for idx, (y_m, m_m) in enumerate(meses_fun_filtrados):
+      sub_fun = df_dh_funnel_plot[(df_dh_funnel_plot["Año"] == y_m) & (df_dh_funnel_plot["Mes"] == m_m)]
+      if sub_fun.empty: continue
+      nombre_m_str = nombres_meses.get(m_m, str(m_m)).title()
+      c_base = colores_fun[idx % len(colores_fun)]
+
+      for met_label in met_funnel_sel:
+        col_key, kind = metricas_funnel_map[met_label]
+        is_pct = kind == "pct"
+        dash_style = "solid" if "Eval" in met_label else ("dash" if "Decl" in met_label else "dot")
+        
+        fig_fun.add_trace(
+            go.Scatter(
+                x=sub_fun["Label_DH"],
+                y=sub_fun[col_key],
+                name=f"{met_label} ({nombre_m_str})",
+                mode="lines+markers",
+                line=dict(color=c_base, width=2.5, dash=dash_style),
+            ),
+            secondary_y=not is_pct
+        )
+
+    fig_fun.update_layout(title="<b>Comportamiento de Funnel y Estado de Leads por Día Hábil</b>", barmode='group', height=540, hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
+    fig_fun.update_yaxes(title_text="Porcentaje (%)", ticksuffix="%", secondary_y=False)
+    fig_fun.update_yaxes(title_text="Volumen (Cantidad)", showgrid=False, secondary_y=True)
+    st.plotly_chart(fig_fun, use_container_width=True)
+
+    # 2. Matriz Comparativa Detallada de Funnel (con % diferenciales vs Prom y vs Ant en Noviembre)
+    if vista_matriz_funnel:
+      df_matrix_f = pd.DataFrame()
+      df_matrix_f["Label_DH"] = df_dh_funnel_plot["Label_DH"].drop_duplicates().sort_values(key=lambda x: int(re.search(r'\d+', str(x)).group()))
+
+      for y_m, m_m in meses_fun_filtrados:
+        m_name = nombres_meses.get(m_m, str(m_m)).title()
+        sub_df = df_dh_funnel_plot[(df_dh_funnel_plot["Año"] == y_m) & (df_dh_funnel_plot["Mes"] == m_m)]
+        for met_label in met_funnel_sel:
+          col_key, kind = metricas_funnel_map[met_label]
+          mapping = dict(zip(sub_df["Label_DH"], sub_df[col_key]))
+          df_matrix_f[f"{met_label} ({m_name})"] = df_matrix_f["Label_DH"].map(mapping)
+
+      df_matrix_f_html = df_matrix_f.astype(object)
+      curr_m_name = nombres_meses.get(mes_sel).title()
+
+      idx_curr_m = [i for i, (y, m) in enumerate(meses_tendencia) if y == año_sel and m == mes_sel]
+      prev_m_name = nombres_meses.get(meses_tendencia[idx_curr_m[0] - 1][1]).title() if (idx_curr_m and idx_curr_m[0] > 0) else None
+      prev_months_names = [nombres_meses.get(m).title() for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
+
+      for col in df_matrix_f.columns:
+        if col == "Label_DH": continue
+        is_curr_month_col = f"({curr_m_name})" in col
+        base_met = col.rsplit(" (", 1)[0]
+        kind = metricas_funnel_map[base_met][1] if base_met in metricas_funnel_map else "pct"
+
+        for idx in df_matrix_f.index:
+          val = df_matrix_f.at[idx, col]
+          if pd.isna(val):
+            df_matrix_f_html.at[idx, col] = "-"
+          else:
+            if is_curr_month_col:
+              prev_cols_met = [f"{base_met} ({pm})" for pm in prev_months_names]
+              prev_vals = [df_matrix_f.at[idx, pc] for pc in prev_cols_met if pc in df_matrix_f.columns and pd.notna(df_matrix_f.at[idx, pc])]
+
+              prom_html = ""
+              if prev_vals:
+                avg_prev = sum(prev_vals) / len(prev_vals)
+                if kind == "pct":
+                  diff_prom = val - avg_prev
+                  arrow_p = "⬆️" if diff_prom >= 0 else "⬇️"
+                  color_p = "#15803d" if (diff_prom >= 0 if "Eval" in base_met or "LE" in base_met else diff_prom <= 0) else "#b91c1c"
+                  prom_html = f'<span style="font-size:10px; color:{color_p}; font-weight:bold;">{arrow_p} Prom: {diff_prom:+.1f}%</span>'
+                else:
+                  pct_change_prom = ((val - avg_prev) / avg_prev * 100.0) if avg_prev > 0 else 0
+                  arrow_p = "⬆️" if pct_change_prom >= 0 else "⬇️"
+                  color_p = "#15803d" if pct_change_prom >= 0 else "#b91c1c"
+                  prom_html = f'<span style="font-size:10px; color:{color_p}; font-weight:bold;">{arrow_p} Prom: {pct_change_prom:+.1f}%</span>'
+
+              ant_html = ""
+              if prev_m_name:
+                prev_col_ant = f"{base_met} ({prev_m_name})"
+                if prev_col_ant in df_matrix_f.columns and pd.notna(df_matrix_f.at[idx, prev_col_ant]):
+                  val_ant = df_matrix_f.at[idx, prev_col_ant]
+                  if kind == "pct":
+                    diff_ant = val - val_ant
+                    arrow_a = "⬆️" if diff_ant >= 0 else "⬇️"
+                    color_a = "#15803d" if (diff_ant >= 0 if "Eval" in base_met or "LE" in base_met else diff_ant <= 0) else "#b91c1c"
+                    ant_html = f'<span style="font-size:10px; color:{color_a}; font-weight:bold;">{arrow_a} vs Ant: {diff_ant:+.1f}%</span>'
+                  else:
+                    pct_change_ant = ((val - val_ant) / val_ant * 100.0) if val_ant > 0 else 0
+                    arrow_a = "⬆️" if pct_change_ant >= 0 else "⬇️"
+                    color_a = "#15803d" if pct_change_ant >= 0 else "#b91c1c"
+                    ant_html = f'<span style="font-size:10px; color:{color_a}; font-weight:bold;">{arrow_a} vs Ant: {pct_change_ant:+.1f}%</span>'
+
+              sub_info = "<br>".join([h for h in [prom_html, ant_html] if h])
+              formatted_val = f"{val:.1f}%" if kind == "pct" else f"{int(val):,}"
+              if sub_info:
+                df_matrix_f_html.at[idx, col] = f'<div style="text-align:center; line-height:1.2;"><b>{formatted_val}</b><br>{sub_info}</div>'
+              else:
+                df_matrix_f_html.at[idx, col] = f'<div style="text-align:center;"><b>{formatted_val}</b></div>'
+            else:
+              formatted_val = f"{val:.1f}%" if kind == "pct" else f"{int(val):,}"
+              df_matrix_f_html.at[idx, col] = f'<div style="text-align:center;">{formatted_val}</div>'
+
+      html_table_f = df_matrix_f_html.to_html(escape=False, index=False)
+      html_table_f = html_table_f.replace('<table border="1" class="dataframe">', '<table style="width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: sans-serif; background-color: #ffffff; border: 1px solid #cbd5e1; margin-bottom: 20px;">')
+      html_table_f = html_table_f.replace('<th>', '<th style="background-color: #f1f5f9; border-bottom: 2px solid #6366f1; padding: 10px 8px; text-align: center; color: #1e1b4b; font-weight: 700;">')
+      html_table_f = html_table_f.replace('<td>', '<td style="border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: center; color: #0f172a; vertical-align: middle;">')
+
+      st.markdown("##### 📋 Matriz Comparativa Detallada de Funnel por Día Hábil")
+      st.markdown(f'<div style="overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">{html_table_f}</div>', unsafe_allow_html=True)
+
+    # 3. Diagnóstico Gerencial de Funnel (Diseño Visual Diferenciado)
+    df_fun_curr = df_dh_funnel[(df_dh_funnel["Año"] == año_sel) & (df_dh_funnel["Mes"] == mes_sel)]
+    if not df_fun_curr.empty:
+      ult_fun = df_fun_curr.iloc[-1]
+      dh_fun_num = int(ult_fun["Día_Hábil"])
+      pct_eval_curr = ult_fun["%_Eval_Acum"]
+      pct_nogest_curr = ult_fun["%_NoGest_Acum"]
+      pct_decl_curr = ult_fun["%_Decl_Acum"]
+
+      df_fun_prevs = df_dh_funnel[(df_dh_funnel["Día_Hábil"] == dh_fun_num) & ((df_dh_funnel["Año"] != año_sel) | (df_dh_funnel["Mes"] != mes_sel))]
+      prom_eval_hist = df_fun_prevs["%_Eval_Acum"].mean() if not df_fun_prevs.empty else 80.0
+      prom_nogest_hist = df_fun_prevs["%_NoGest_Acum"].mean() if not df_fun_prevs.empty else 10.0
+      prom_decl_hist = df_fun_prevs["%_Decl_Acum"].mean() if not df_fun_prevs.empty else 12.0
+
+      diff_eval_fun = pct_eval_curr - prom_eval_hist
+      diff_nogest_fun = pct_nogest_curr - prom_nogest_hist
+      diff_decl_fun = pct_decl_curr - prom_decl_hist
+
+      badge_funnel = (f'<span class="arrow-badge-up" style="background-color:#e0e7ff; color:#3730a3;">📊 Tasa de Evaluación: {pct_eval_curr:.1f}%</span>')
+
+      st.markdown(
+          f"""
+          <div class="diag-box-funnel">
+              <div class="diag-header-funnel">📌 Diagnóstico Gerencial de Eficiencia de Funnel & Cartera — CORTE A DH {dh_fun_num}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                  <div>
+                      <span style="font-size:13px; color:#4338ca; font-weight:700;">SALUD GENERAL DEL EMBUDO:</span>
+                      <b style="font-size:18px; color:#1e1b4b; margin-left:8px;">{pct_eval_curr:.1f}% Evaluado</b>
+                      <span style="font-size:12px; color:#6366f1;">({ult_fun['Eval_Acum']:,} de {ult_fun['LE_Acum']:,} LE)</span>
+                  </div>
+                  <div>{badge_funnel}</div>
+              </div>
+              <div style="border-top: 1px dashed #a5b4fc; padding-top:10px;">
+                  <div style="font-size:13px; font-weight:800; color:#1e1b4b; margin-bottom:6px;">Análisis Detallado por Etapa del Embudo:</div>
+                  <div class="causal-item">
+                      • <b>Tasa de Evaluación de Cartera:</b> La conversión a dictamen al DH {dh_fun_num} se sitúa en <b>{pct_eval_curr:.1f}%</b>, con una variación de <b style="color:{'#15803d' if diff_eval_fun >= 0 else '#b91c1c'};">{diff_eval_fun:+.1f}%</b> frente a la media histórica ({prom_eval_hist:.1f}%).
+                  </div>
+                  <div class="causal-item">
+                      • <b>Represamiento de Leads (No Gestionados):</b> La proporción sin dictaminar alcanza un <b>{pct_nogest_curr:.1f}%</b> ({ult_fun['NoGest_Acum']:,} registros en mesa de control), representando una diferencia de <b style="color:{'#15803d' if diff_nogest_fun <= 0 else '#b91c1c'};">{diff_nogest_fun:+.1f}%</b> respecto a meses anteriores ({prom_nogest_hist:.1f}%).
+                  </div>
+                  <div class="causal-item">
+                      • <b>Nivel de Declinación Directa:</b> El rechazo acumulado se ubica en <b>{pct_decl_curr:.1f}%</b> ({ult_fun['Decl_Acum']:,} trámites), variando en <b style="color:{'#15803d' if diff_decl_fun <= 0 else '#b91c1c'};">{diff_decl_fun:+.1f}%</b> vs promedio ({prom_decl_hist:.1f}%).
+                  </div>
+                  <div style="background-color:#ffffff; padding:12px 14px; border-radius:6px; margin-top:10px; font-size:12px; color:#312e81; border-left:4px solid #4f46e5; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+                      <div style="font-weight:800; color:#1e1b4b; margin-bottom:4px;">📌 Conclusión & Acciones Recomendadas para Piso y Mesa de Control:</div>
+                      <div>Actualmente el <b>{pct_nogest_curr:.1f}%</b> de la cartera generada en el mes se encuentra pendiente de validación final. Se recomienda priorizar el seguimiento a los <b>{ult_fun['NoGest_Acum']:,} trámites sin dictamen</b> para acelerar su tránsito a aprobación y asegurar el cumplimiento de las metas de maduración de ventas.</div>
+                  </div>
+              </div>
+          </div>
+          """,
+          unsafe_allow_html=True,
+      )
 
 else:
   st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
