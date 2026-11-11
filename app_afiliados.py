@@ -1625,7 +1625,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CORREGIDO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1662,7 +1662,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
         meta_acum += 4.10
     return meta_acum
 
-  # Fecha de corte acumulada a ayer para meta esperada
   hoy = date.today()
   if año_sel == hoy.year and mes_sel == hoy.month:
     dia_corte_ayer = max(1, hoy.day - 1)
@@ -1672,7 +1671,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   meta_le_ind_ayer = calcular_meta_le_mx(año_sel, mes_sel, dia_corte_ayer)
   meta_le_ind_mes = calcular_meta_le_mx(año_sel, mes_sel)
 
-  # Tabla de comisiones por puntos COP
   tabla_comisiones_cop = {
       0: 0, 11: 103500, 12: 165600, 13: 186300, 14: 207000, 15: 269100,
       16: 331200, 17: 393300, 18: 434700, 19: 455400, 20: 476100, 21: 496800,
@@ -1716,7 +1714,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     asesor_op_sel = st.selectbox("Filtrar por Asesor:", asesores_disp, index=0, key="op_agt_filter")
 
   # -------------------------------------------------------------------------
-  # 2. FILTRADO DE DATASETS OPERATIVOS & CRUCE DE LLAMADAS
+  # 2. FILTRADO DE DATASETS OPERATIVOS & CONTEO DE ASESORES ACTIVOS DEL MES
   # -------------------------------------------------------------------------
   df_vta_op = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy()
 
@@ -1740,148 +1738,23 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   else:
     df_calls_op = pd.DataFrame()
 
-  # -------------------------------------------------------------------------
-  # 3. CÁLCULO DE KPIS OPERATIVOS Y RECUADROS SUPERIORES REESTRUCTURADOS
-  # -------------------------------------------------------------------------
-  le_op_total = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in df_vta_op.columns and not df_vta_op.empty) else 0.0
-  tramites_op_total = float(len(df_vta_op))
+  # Determinación dinámica de asesores activos que operaron en el mes
+  asesores_activos_set = set()
+  if not df_vta_op.empty and "agente" in df_vta_op.columns:
+    asesores_activos_set.update(df_vta_op["agente"].dropna().astype(str).str.strip().unique())
+  if not df_calls_op.empty and "agente" in df_calls_op.columns:
+    asesores_activos_set.update(df_calls_op["agente"].dropna().astype(str).str.strip().unique())
 
-  # Suma de llamadas utilizando la columna E (Calls_Val)
-  if not df_calls_op.empty and "Calls_Val" in df_calls_op.columns:
-    llamadas_op_total = float(pd.to_numeric(df_calls_op["Calls_Val"], errors="coerce").fillna(0).sum())
+  if asesor_op_sel != "Todos":
+    agt_activos_count = 1.0
   else:
-    llamadas_op_total = 0.0
-
-  if not df_dist_sub.empty:
-    col_estado_dist = next((c for c in df_dist_sub.columns if str(c).strip().lower() in ["estado", "status"]), None)
-    if col_estado_dist:
-      agt_activos_count = float(df_dist_sub[df_dist_sub[col_estado_dist].astype(str).str.upper() == "ACTIVO"].shape[0])
-    else:
-      agt_activos_count = float(len(df_dist_sub))
-  else:
-    agt_activos_count = float(df_vta_op["agente"].nunique()) if ("agente" in df_vta_op.columns and not df_vta_op.empty) else 1.0
-
-  agt_activos_count = max(1.0, agt_activos_count)
-
-  # Metas globales del equipo a ayer
-  meta_le_equipo_ayer = float(meta_le_ind_ayer) * agt_activos_count
-  desviacion_le_equipo = le_op_total - meta_le_equipo_ayer
-  pct_cumplimiento_le_equipo = (le_op_total / meta_le_equipo_ayer * 100.0) if meta_le_equipo_ayer > 0 else 0.0
-
-  # Medias por asesor
-  media_leads_real_asesor = le_op_total / agt_activos_count
-  media_leads_esperada_asesor = float(meta_le_ind_ayer)
-  desv_media_leads = media_leads_real_asesor - media_leads_esperada_asesor
-
-  media_llamadas_asesor = llamadas_op_total / agt_activos_count
-
-  # AP Mes y AP Cosecha globales de la operación filtrada
-  inicio_m_op = date(año_sel, mes_sel, 1)
-  df_ap_m_op = df_vta_op[(pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.month == mes_sel) & (df_vta_op["DECISION"] == "A")] if not df_vta_op.empty else pd.DataFrame()
-  ap_mes_op = float(len(df_ap_m_op))
-
-  df_ap_cos_op = df_ventas[
-      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel) &
-      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel) &
-      (pd.to_datetime(df_ventas["F_VTA"]) < pd.Timestamp(inicio_m_op)) &
-      (df_ventas["DECISION"] == "A")
-  ] if not df_ventas.empty else pd.DataFrame()
-  
-  if sup_sel != "Todos" and "Supervisor" in df_ap_cos_op.columns:
-    df_ap_cos_op = df_ap_cos_op[df_ap_cos_op["Supervisor"] == sup_sel]
-  if asesor_op_sel != "Todos" and "agente" in df_ap_cos_op.columns:
-    df_ap_cos_op = df_ap_cos_op[df_ap_cos_op["agente"] == asesor_op_sel]
-
-  ap_cos_op = float(len(df_ap_cos_op))
-  ap_totales_op = ap_mes_op + ap_cos_op
-  media_ap_asesor = ap_totales_op / agt_activos_count
-
-  # % Evaluado de la operación corregido sintácticamente
-  if not df_vta_op.empty and "DECISION" in df_vta_op.columns and "ESTADO" in df_vta_op.columns:
-    evaluados_op = float(((df_vta_op["ESTADO"] == "LEAD EFECTIVO") & (df_vta_op["DECISION"].astype(str).str.strip().str.upper().isin(["A", "D", "P", "C"]))).sum())
-  else:
-    evaluados_op = 0.0
-
-  pct_eval_op = (evaluados_op / le_op_total * 100.0) if le_op_total > 0 else 0.0
-
-  # Puntos Totales de la operación = Suma de AP Totales del mes filtrado
-  puntos_totales_op = ap_totales_op
-  media_puntos_asesor = puntos_totales_op / agt_activos_count
+    agt_activos_count = float(len(asesores_activos_set)) if len(asesores_activos_set) > 0 else 1.0
 
   # -------------------------------------------------------------------------
-  # RECUADROS KPI SUPERIORES (FILA DE 6 TARJETAS ORGANIZADAS)
+  # 3. AGRUPACIÓN COMPLETA POR ASESOR (SUMA COLUMNA PUNTOS + CRUCE COMPLETO)
   # -------------------------------------------------------------------------
-  col_kpi_r1, col_kpi_r2, col_kpi_r3 = st.columns(3)
+  col_puntos_vta = next((c for c in df_ventas.columns if str(c).strip().upper() in ["PUNTOS", "PUNTO", "PTS", "PUNTOS_VTA", "PUNTO_VTA", "PUNTOS TARJETA"]), None)
 
-  with col_kpi_r1:
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">LEADS EFECTIVOS (A AYER - DH {dia_corte_ayer})</div>
-        <div class="kpi-value">{int(le_op_total):,}</div>
-        <div class="kpi-subtext">Meta Equipo: <b>{meta_le_equipo_ayer:,.1f}</b></div>
-        <div class="kpi-subtext">Desviación: <b style="color:{'#15803d' if desviacion_le_equipo >= 0 else '#b91c1c'};">{desviacion_le_equipo:+,.1f} ({pct_cumplimiento_le_equipo:.1f}%)</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  with col_kpi_r2:
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">MEDIA LEADS POR ASESOR</div>
-        <div class="kpi-value">{media_leads_real_asesor:,.1f}</div>
-        <div class="kpi-subtext">Media Esperada a Ayer: <b>{media_leads_esperada_asesor:,.1f}</b></div>
-        <div class="kpi-subtext">Desviación Ind.: <b style="color:{'#15803d' if desv_media_leads >= 0 else '#b91c1c'};">{desv_media_leads:+,.1f}</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  with col_kpi_r3:
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">MEDIA LLAMADAS POR ASESOR</div>
-        <div class="kpi-value">{media_llamadas_asesor:,.1f}</div>
-        <div class="kpi-subtext">Llamadas Totales (Col E): <b>{int(llamadas_op_total):,}</b></div>
-        <div class="kpi-subtext">Asesores Activos: <b>{int(agt_activos_count)}</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  col_kpi_r4, col_kpi_r5, col_kpi_r6 = st.columns(3)
-
-  with col_kpi_r4:
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">AP MES / COSECHA / TOTALES</div>
-        <div class="kpi-value">{int(ap_totales_op):,} <span style="font-size:14px; color:#64748b;">AP Tot.</span></div>
-        <div class="kpi-subtext">AP Mes: <b>{int(ap_mes_op):,}</b> | AP Cosecha: <b>{int(ap_cos_op):,}</b></div>
-        <div class="kpi-subtext">Media AP/Asesor: <b style="color:{'#15803d' if media_ap_asesor >= 5.0 else '#d97706'};">{media_ap_asesor:.1f}</b> (Obj: 5.0 AP)</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  with col_kpi_r5:
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">% EVALUADO OPERACIÓN</div>
-        <div class="kpi-value">{pct_eval_op:.1f}%</div>
-        <div class="kpi-subtext">Objetivo Operación: <b>30.0%</b></div>
-        <div class="kpi-subtext">Desviación vs Obj: <b style="color:{'#15803d' if pct_eval_op >= 30.0 else '#b91c1c'};">{pct_eval_op - 30.0:+.1f}%</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  with col_kpi_r6:
-    pct_cump_puntos_op = (media_puntos_asesor / 11.0 * 100.0) if 11.0 > 0 else 0.0
-    st.markdown(f"""
-    <div class="kpi-card">
-        <div class="kpi-title">PUNTOS DE LA OPERACIÓN</div>
-        <div class="kpi-value">{media_puntos_asesor:.1f} <span style="font-size:14px; color:#64748b;">Pts/Asesor</span></div>
-        <div class="kpi-subtext">Objetivo: <b>11.0 Pts/Asesor</b> ({pct_cump_puntos_op:.1f}%)</div>
-        <div class="kpi-subtext">Puntos Totales Operación: <b>{puntos_totales_op:,.1f}</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-  st.divider()
-  st.subheader("📋 Matriz Comparativa Operativa por Asesor")
-
-  # -------------------------------------------------------------------------
-  # 4. AGRUPACIÓN POR ASESOR CON CRUCE DE COLUMNAS C Y E DE LLAMADAS & PUNTOS
-  # -------------------------------------------------------------------------
   def agrupar_por_asesor_completo(df_sub, df_vta_full, df_calls_sub):
     records = []
     col_agente = "agente" if "agente" in df_sub.columns else ("asesor" if "asesor" in df_sub.columns else df_sub.columns[0])
@@ -1921,8 +1794,10 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       pct_cump_le = (le_v / meta_le_ind) if meta_le_ind > 0 else 0.0
 
       if "F_DEC_EFF" in grp.columns and "DECISION" in grp.columns:
-        ap_m = float((is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")).sum())
+        ap_m_mask = is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")
+        ap_m = float(ap_m_mask.sum())
       else:
+        ap_m_mask = pd.Series(False, index=grp.index)
         ap_m = 0.0
 
       if not df_vta_full.empty and "agente" in df_vta_full.columns and "F_DEC_EFF" in df_vta_full.columns:
@@ -1931,13 +1806,22 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
             (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.year == año_sel) &
             (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.month == mes_sel) &
             (pd.to_datetime(df_vta_full["F_VTA"]) < pd.Timestamp(inicio_m_func)) &
-            (df_vta_full["DECISION"] == "A")
+            (df_vta_full["DECISION"].astype(str).str.strip().str.upper() == "A")
         ]
         ap_cos = float(len(df_cos_agt))
       else:
+        df_cos_agt = pd.DataFrame()
         ap_cos = 0.0
 
       ap_tot = ap_m + ap_cos
+
+      # Cálculo de Puntos sumando la columna PUNTOS de la hoja de ventas para las AP dictaminadas en el mes
+      if col_puntos_vta and col_puntos_vta in grp.columns:
+        pts_mes = pd.to_numeric(grp.loc[ap_m_mask, col_puntos_vta], errors="coerce").fillna(1.0).sum()
+        pts_cos = (pd.to_numeric(df_cos_agt[col_puntos_vta], errors="coerce").fillna(1.0).sum() if not df_cos_agt.empty and col_puntos_vta in df_cos_agt.columns else 0.0)
+        pts_val = float(pts_mes + pts_cos)
+      else:
+        pts_val = float(ap_tot)
 
       eval_v = float(is_eval.sum())
       no_eval_v = float(is_no_eval.sum())
@@ -1959,8 +1843,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       pct_decl = (decl_v / le_v) if le_v > 0 else 0.0
       pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
       pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
-
-      pts_val = float(ap_tot)
 
       pct_cump_puntos = (pts_val / 11.0) if pts_val > 0 else 0.0
       comision_cop_val = float(obtener_comision_cop(pts_val))
@@ -2003,69 +1885,262 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     return pd.DataFrame(records)
 
   if not df_vta_op.empty:
-    df_matriz_agt = agrupar_por_asesor_completo(df_vta_op, df_ventas, df_calls_op)
+    df_matriz_agt_base = agrupar_por_asesor_completo(df_vta_op, df_ventas, df_calls_op)
+  else:
+    df_matriz_agt_base = pd.DataFrame()
 
-    if not df_matriz_agt.empty:
-      media_llamadas_op = df_matriz_agt["Llamadas Efectivas"].mean()
-      df_matriz_agt["Desbordamiento / Llamadas"] = df_matriz_agt["Llamadas Efectivas"] - media_llamadas_op
-      df_matriz_agt["% Desbordamiento"] = np.where(
-          df_matriz_agt["Llamadas Efectivas"] > 0,
-          df_matriz_agt["Desbordamiento / Llamadas"] / df_matriz_agt["Llamadas Efectivas"],
-          0.0
-      )
+  # -------------------------------------------------------------------------
+  # 4. CÁLCULO DE KPIS GENERALES Y RECUADROS ADICIONALES REESTRUCTURADOS (3x3)
+  # -------------------------------------------------------------------------
+  le_op_total = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in df_vta_op.columns and not df_vta_op.empty) else 0.0
+  tramites_op_total = float(len(df_vta_op))
 
-      tot_agt = df_matriz_agt.sum(numeric_only=True).to_dict()
-      tot_agt["Asesor"] = "TOTAL GENERAL"
-      tot_agt["Supervisor"] = "-"
-      tot_agt["CR / Llamadas"] = (tot_agt["Trámites"] / tot_agt["Llamadas Efectivas"]) if tot_agt.get("Llamadas Efectivas", 0) > 0 else 0.0
-      tot_agt["% Cump LE"] = (tot_agt["LE"] / tot_agt["Meta LE"]) if tot_agt.get("Meta LE", 0) > 0 else 0.0
-      tot_agt["Desbordamiento / Llamadas"] = 0.0
-      tot_agt["% Desbordamiento"] = 0.0
-      tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
-      tot_agt["% REM/RECH"] = (tot_agt["Otros"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
-      tot_agt["% AP Mes"] = (tot_agt["AP Mes"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% AP Total"] = (tot_agt["Total AP"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% Eval"] = (tot_agt["Eval"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% No Evaluado"] = (tot_agt["No Evaluado"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% Decl"] = (tot_agt["Decl"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% Canc"] = (tot_agt["Canc"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
-      tot_agt["% Cump Puntos"] = (tot_agt["Puntos"] / (11.0 * len(df_matriz_agt))) if len(df_matriz_agt) > 0 else 0.0
+  if not df_calls_op.empty and "Calls_Val" in df_calls_op.columns:
+    llamadas_op_total = float(pd.to_numeric(df_calls_op["Calls_Val"], errors="coerce").fillna(0).sum())
+  else:
+    llamadas_op_total = 0.0
 
-      cols_orden = [
-          "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "Meta LE", "LE", "% Cump LE",
-          "CR / Llamadas", "Desbordamiento / Llamadas", "% Desbordamiento", "No Cap", "No Cond",
-          "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes",
-          "% AP Total", "Eval", "% Eval", "No Evaluado", "% No Evaluado", "Decl", "% Decl",
-          "Canc", "% Canc", "Pend", "% Pend", "Puntos", "% Cump Puntos", "Comisión COP"
-      ]
+  meta_le_equipo_ayer = float(meta_le_ind_ayer) * agt_activos_count
+  desviacion_le_equipo = le_op_total - meta_le_equipo_ayer
+  pct_cumplimiento_le_equipo = (le_op_total / meta_le_equipo_ayer * 100.0) if meta_le_equipo_ayer > 0 else 0.0
 
-      df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)[cols_orden]
+  media_leads_real_asesor = le_op_total / agt_activos_count
+  media_leads_esperada_asesor = float(meta_le_ind_ayer)
+  desv_media_leads = media_leads_real_asesor - media_leads_esperada_asesor
 
-      format_agt_dict = {
-          "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "Meta LE": "{:,.1f}", "LE": "{:,.0f}",
-          "% Cump LE": "{:.1%}", "CR / Llamadas": "{:.1%}", "Desbordamiento / Llamadas": "{:+,.0f}",
-          "% Desbordamiento": "{:+.1%}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
-          "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "AP Cosecha": "{:,.0f}",
-          "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
-          "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}", "% No Evaluado": "{:.1%}",
-          "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}", "% Canc": "{:.1%}",
-          "Pend": "{:,.0f}", "% Pend": "{:.1%}", "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}",
-          "Comisión COP": "${:,.0f}"
-      }
+  media_llamadas_asesor = llamadas_op_total / agt_activos_count
 
-      def resaltar_desbordamiento(val):
-        if not isinstance(val, (int, float, np.number)): return ""
-        if val > 0: return "background-color: #dcfce7; color: #15803d; font-weight: bold;"
-        if val < 0: return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
-        return ""
+  inicio_m_op = date(año_sel, mes_sel, 1)
+  df_ap_m_op = df_vta_op[(pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.month == mes_sel) & (df_vta_op["DECISION"] == "A")] if not df_vta_op.empty else pd.DataFrame()
+  ap_mes_op = float(len(df_ap_m_op))
 
-      styler_agt = (
-          df_matriz_agt.style.format(format_agt_dict)
-          .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
-          .map(resaltar_desbordamiento, subset=["Desbordamiento / Llamadas", "% Desbordamiento"])
-      )
+  df_ap_cos_op = df_ventas[
+      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel) &
+      (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel) &
+      (pd.to_datetime(df_ventas["F_VTA"]) < pd.Timestamp(inicio_m_op)) &
+      (df_ventas["DECISION"] == "A")
+  ] if not df_ventas.empty else pd.DataFrame()
+  
+  if sup_sel != "Todos" and "Supervisor" in df_ap_cos_op.columns:
+    df_ap_cos_op = df_ap_cos_op[df_ap_cos_op["Supervisor"] == sup_sel]
+  if asesor_op_sel != "Todos" and "agente" in df_ap_cos_op.columns:
+    df_ap_cos_op = df_ap_cos_op[df_ap_cos_op["agente"] == asesor_op_sel]
 
-      st.dataframe(styler_agt, use_container_width=True, height=680, hide_index=True)
+  ap_cos_op = float(len(df_ap_cos_op))
+  ap_totales_op = ap_mes_op + ap_cos_op
+  media_ap_asesor = ap_totales_op / agt_activos_count
+
+  if not df_vta_op.empty and "DECISION" in df_vta_op.columns and "ESTADO" in df_vta_op.columns:
+    evaluados_op = float(((df_vta_op["ESTADO"] == "LEAD EFECTIVO") & (df_vta_op["DECISION"].astype(str).str.strip().str.upper().isin(["A", "D", "P", "C"]))).sum())
+  else:
+    evaluados_op = 0.0
+
+  pct_eval_op = (evaluados_op / le_op_total * 100.0) if le_op_total > 0 else 0.0
+
+  puntos_totales_op = df_matriz_agt_base["Puntos"].sum() if not df_matriz_agt_base.empty else ap_totales_op
+  media_puntos_asesor = puntos_totales_op / agt_activos_count
+
+  # Métricas detalladas a nivel de asesor para recuadros adicionales
+  if not df_matriz_agt_base.empty:
+    df_agt_only = df_matriz_agt_base[df_matriz_agt_base["Asesor"] != "TOTAL GENERAL"].copy()
+    total_asesores_eval = len(df_agt_only)
+
+    cumplen_eval = int((df_agt_only["% Eval"] >= 0.30).sum())
+    incumplen_eval = total_asesores_eval - cumplen_eval
+
+    cumplen_no_eval = int((df_agt_only["% No Evaluado"] < 0.70).sum())
+    incumplen_no_eval = total_asesores_eval - cumplen_no_eval
+
+    asesores_comisionando_count = int((df_agt_only["Comisión COP"] > 0).sum())
+    pct_comisionando = (asesores_comisionando_count / total_asesores_eval * 100.0) if total_asesores_eval > 0 else 0.0
+    monto_total_comisiones = df_agt_only["Comisión COP"].sum()
+
+    cr_media_op = (tramites_op_total / llamadas_op_total) if llamadas_op_total > 0 else 0.0
+    cumplen_cr = int((df_agt_only["CR / Llamadas"] >= cr_media_op).sum())
+    incumplen_cr = total_asesores_eval - cumplen_cr
+  else:
+    total_asesores_eval = 0
+    cumplen_eval = 0
+    incumplen_eval = 0
+    cumplen_no_eval = 0
+    incumplen_no_eval = 0
+    asesores_comisionando_count = 0
+    pct_comisionando = 0.0
+    monto_total_comisiones = 0.0
+    cr_media_op = 0.0
+    cumplen_cr = 0
+    incumplen_cr = 0
+
+  # -------------------------------------------------------------------------
+  # RECUADROS KPI SUPERIORES (FILA 3x3 COMPLETA)
+  # -------------------------------------------------------------------------
+  col_kpi_r1, col_kpi_r2, col_kpi_r3 = st.columns(3)
+
+  with col_kpi_r1:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">LEADS EFECTIVOS (A AYER - DH {dia_corte_ayer})</div>
+        <div class="kpi-value">{int(le_op_total):,}</div>
+        <div class="kpi-subtext">Meta Equipo: <b>{meta_le_equipo_ayer:,.1f}</b></div>
+        <div class="kpi-subtext">Desviación: <b style="color:{'#15803d' if desviacion_le_equipo >= 0 else '#b91c1c'};">{desviacion_le_equipo:+,.1f} ({pct_cumplimiento_le_equipo:.1f}%)</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r2:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">MEDIA LEADS POR ASESOR</div>
+        <div class="kpi-value">{media_leads_real_asesor:,.1f}</div>
+        <div class="kpi-subtext">Media Esperada a Ayer: <b>{media_leads_esperada_asesor:,.1f}</b></div>
+        <div class="kpi-subtext">Desviación Ind.: <b style="color:{'#15803d' if desv_media_leads >= 0 else '#b91c1c'};">{desv_media_leads:+,.1f}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r3:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">MEDIA LLAMADAS POR ASESOR</div>
+        <div class="kpi-value">{media_llamadas_asesor:,.1f}</div>
+        <div class="kpi-subtext">Llamadas Totales (Col E): <b>{int(llamadas_op_total):,}</b></div>
+        <div class="kpi-subtext">Asesores Activos del Mes: <b>{int(agt_activos_count)}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  col_kpi_r4, col_kpi_r5, col_kpi_r6 = st.columns(3)
+
+  with col_kpi_r4:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">AP MES / COSECHA / TOTALES</div>
+        <div class="kpi-value">{int(ap_totales_op):,} <span style="font-size:14px; color:#64748b;">AP Tot.</span></div>
+        <div class="kpi-subtext">AP Mes: <b>{int(ap_mes_op):,}</b> | AP Cosecha: <b>{int(ap_cos_op):,}</b></div>
+        <div class="kpi-subtext">Media AP/Asesor: <b style="color:{'#15803d' if media_ap_asesor >= 5.0 else '#d97706'};">{media_ap_asesor:.1f}</b> (Obj: 5.0 AP)</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r5:
+    pct_cump_puntos_op = (media_puntos_asesor / 11.0 * 100.0) if 11.0 > 0 else 0.0
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">PUNTOS DE LA OPERACIÓN</div>
+        <div class="kpi-value">{media_puntos_asesor:.1f} <span style="font-size:14px; color:#64748b;">Pts/Asesor</span></div>
+        <div class="kpi-subtext">Objetivo: <b>11.0 Pts/Asesor</b> ({pct_cump_puntos_op:.1f}%)</div>
+        <div class="kpi-subtext">Puntos Totales Operación: <b>{puntos_totales_op:,.1f}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r6:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">ASESORES COMISIONANDO</div>
+        <div class="kpi-value">{asesores_comisionando_count} <span style="font-size:14px; color:#64748b;">Asesores</span></div>
+        <div class="kpi-subtext">% Comisionando: <b>{pct_comisionando:.1f}%</b> ({asesores_comisionando_count}/{total_asesores_eval})</div>
+        <div class="kpi-subtext">Total Comisiones COP: <b style="color:#15803d;">${monto_total_comisiones:,.0f}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  col_kpi_r7, col_kpi_r8, col_kpi_r9 = st.columns(3)
+
+  with col_kpi_r7:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">% EVALUADO OPERACIÓN</div>
+        <div class="kpi-value">{pct_eval_op:.1f}%</div>
+        <div class="kpi-subtext">Objetivo Operación: <b>≥ 30.0%</b></div>
+        <div class="kpi-subtext">Cumplen (≥30%): <b style="color:#15803d;">{cumplen_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_eval}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r8:
+    pct_no_eval_op = (100.0 - pct_eval_op) if le_op_total > 0 else 0.0
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">% NO EVALUADO OPERACIÓN</div>
+        <div class="kpi-value">{pct_no_eval_op:.1f}%</div>
+        <div class="kpi-subtext">Objetivo Operación: <b>< 70.0%</b></div>
+        <div class="kpi-subtext">Cumplen (<70%): <b style="color:#15803d;">{cumplen_no_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_no_eval}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_r9:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">CONVERSIÓN CR% LLAMADAS</div>
+        <div class="kpi-value">{cr_media_op:.1%}</div>
+        <div class="kpi-subtext">Media Operación (Trámites/Llamadas)</div>
+        <div class="kpi-subtext">En/Sobre Media: <b style="color:#15803d;">{cumplen_cr}</b> | Bajo Media: <b style="color:#b91c1c;">{incumplen_cr}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  st.divider()
+  st.subheader("📋 Matriz Comparativa Operativa por Asesor")
+
+  # -------------------------------------------------------------------------
+  # 5. MOSTRAR MATRIZ TABULAR FINAL CON DESBORDAMIENTO & TOTAL GENERAL
+  # -------------------------------------------------------------------------
+  if not df_matriz_agt_base.empty:
+    df_matriz_agt = df_matriz_agt_base.copy()
+
+    media_llamadas_op = df_matriz_agt["Llamadas Efectivas"].mean()
+    df_matriz_agt["Desbordamiento / Llamadas"] = df_matriz_agt["Llamadas Efectivas"] - media_llamadas_op
+    df_matriz_agt["% Desbordamiento"] = np.where(
+        df_matriz_agt["Llamadas Efectivas"] > 0,
+        df_matriz_agt["Desbordamiento / Llamadas"] / df_matriz_agt["Llamadas Efectivas"],
+        0.0
+    )
+
+    tot_agt = df_matriz_agt.sum(numeric_only=True).to_dict()
+    tot_agt["Asesor"] = "TOTAL GENERAL"
+    tot_agt["Supervisor"] = "-"
+    tot_agt["CR / Llamadas"] = (tot_agt["Trámites"] / tot_agt["Llamadas Efectivas"]) if tot_agt.get("Llamadas Efectivas", 0) > 0 else 0.0
+    tot_agt["% Cump LE"] = (tot_agt["LE"] / tot_agt["Meta LE"]) if tot_agt.get("Meta LE", 0) > 0 else 0.0
+    tot_agt["Desbordamiento / Llamadas"] = 0.0
+    tot_agt["% Desbordamiento"] = 0.0
+    tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
+    tot_agt["% REM/RECH"] = (tot_agt["Otros"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
+    tot_agt["% AP Mes"] = (tot_agt["AP Mes"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% AP Total"] = (tot_agt["Total AP"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% Eval"] = (tot_agt["Eval"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% No Evaluado"] = (tot_agt["No Evaluado"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% Decl"] = (tot_agt["Decl"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% Canc"] = (tot_agt["Canc"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+    tot_agt["% Cump Puntos"] = (tot_agt["Puntos"] / (11.0 * len(df_matriz_agt))) if len(df_matriz_agt) > 0 else 0.0
+
+    cols_orden = [
+        "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "Meta LE", "LE", "% Cump LE",
+        "CR / Llamadas", "Desbordamiento / Llamadas", "% Desbordamiento", "No Cap", "No Cond",
+        "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes",
+        "% AP Total", "Eval", "% Eval", "No Evaluado", "% No Evaluado", "Decl", "% Decl",
+        "Canc", "% Canc", "Pend", "% Pend", "Puntos", "% Cump Puntos", "Comisión COP"
+    ]
+
+    df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)[cols_orden]
+
+    format_agt_dict = {
+        "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "Meta LE": "{:,.1f}", "LE": "{:,.0f}",
+        "% Cump LE": "{:.1%}", "CR / Llamadas": "{:.1%}", "Desbordamiento / Llamadas": "{:+,.0f}",
+        "% Desbordamiento": "{:+.1%}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
+        "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "AP Cosecha": "{:,.0f}",
+        "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
+        "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}", "% No Evaluado": "{:.1%}",
+        "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}", "% Canc": "{:.1%}",
+        "Pend": "{:,.0f}", "% Pend": "{:.1%}", "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}",
+        "Comisión COP": "${:,.0f}"
+    }
+
+    def resaltar_desbordamiento(val):
+      if not isinstance(val, (int, float, np.number)): return ""
+      if val > 0: return "background-color: #dcfce7; color: #15803d; font-weight: bold;"
+      if val < 0: return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
+      return ""
+
+    styler_agt = (
+        df_matriz_agt.style.format(format_agt_dict)
+        .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+        .map(resaltar_desbordamiento, subset=["Desbordamiento / Llamadas", "% Desbordamiento"])
+    )
+
+    st.dataframe(styler_agt, use_container_width=True, height=680, hide_index=True)
   else:
     st.info("ℹ️ No se encontraron registros de ventas para el filtro operativo seleccionado.")
