@@ -2090,9 +2090,13 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   # =========================================================================
   # 🎯 CUADRO Y FICHA DE ANÁLISIS GERENCIAL DE MADURACIÓN & PROYECCIÓN
   # =========================================================================
-  df_dh_curr = df_dh_todos[
-      (df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] mes_sel)
-  ] if "Mes" in df_dh_todos.columns else pd.DataFrame()
+  df_dh_curr = (
+      df_dh_todos[
+          (df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] == mes_sel)
+      ]
+      if "Mes" in df_dh_todos.columns and not df_dh_todos.empty
+      else pd.DataFrame()
+  )
 
   if not df_dh_curr.empty:
     ult_row_dh = df_dh_curr.iloc[-1]
@@ -2117,7 +2121,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     diff_vs_hist_dh = pct_act_dh - prom_pct_prev_dh
 
     # CÁLCULO DE MADURACIÓN (CARTERA RECIENTE EN EVALUACIÓN)
-    # Identificar leads de los últimos 3 días que aún están madurando (retraso en decisión)
     df_ventas_curr_m = df_ventas[
         (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
         & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
@@ -2128,7 +2131,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
         & (df_ventas_curr_m["BX_EMPTY"])
     ].shape[0]
 
-    # Tasa estimada de maduración esperada al cierre (Media histórica final AP MES es ~4.2% - 4.5%)
+    # Tasa estimada de maduración esperada al cierre
     tasa_cierre_esperada = max(prom_pct_prev_dh, 4.3) / 100.0
     ap_adicionales_estimadas = int(leads_en_maduracion * tasa_cierre_esperada)
     pct_proyectado_cierre = (
