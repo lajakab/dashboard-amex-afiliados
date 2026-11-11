@@ -272,6 +272,13 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   dias_nombres_map = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado"}
   df_cal["Nombre_Día"] = df_cal["Día_Semana"].map(dias_nombres_map)
 
+  # ETIQUETADO Y FILTRO DE DÍA HÁBIL (DH) EN SIDEBAR
+  df_cal["Día_Hábil"] = [f"DH {i}" for i in range(1, len(df_cal) + 1)]
+  dias_habiles_disp = df_cal["Día_Hábil"].tolist()
+  dias_habiles_sel = st.sidebar.multiselect("Día Hábil (DH)", options=dias_habiles_disp, default=[])
+  if dias_habiles_sel:
+    df_cal = df_cal[df_cal["Día_Hábil"].isin(dias_habiles_sel)]
+
   dias_semana_sel = st.sidebar.multiselect("Día de la Semana", options=list(dias_nombres_map.values()), default=[])
   if dias_semana_sel:
     df_cal = df_cal[df_cal["Nombre_Día"].isin(dias_semana_sel)]
@@ -614,15 +621,19 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                 vmin, vmax = min_max_dict["LE"]
                 bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
                 if bg: cell_style += " " + bg
-            elif col in ["% LE", "Prom", "% AP Día", "% Eval"]:
-              # Verde para valores altos, Naranja intermedio, Rojo para valores bajos
+            elif col in ["% LE", "Prom"]:
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
-            elif col in ["% AP Acum M", "% AP Tot"]:
-              # Verde para valores altos, Blanco para valores bajos
+            elif col in ["% AP Día", "% Eval"]:
+              # VERDE (alto) A BLANCO (bajo) - SIN ROJO
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
+              if bg: cell_style += " " + bg
+            elif col in ["% AP Acum M", "% AP Tot"]:
+              # VERDE (alto) A ROJO (bajo) - DE MAYOR A MENOR
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
             elif col == "% REM/RECH":
               vmin, vmax = min_max_dict[col]
@@ -955,7 +966,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     meses_tendencia_filtrados = [opciones_meses_dh[k] for k in meses_dh_nombres_sel if k in opciones_meses_dh]
   with col_ctrl3:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    vista_tabla_dh = st.checkbox("Mostrar Matriz Comparativa", value=False)
+    # MATRIZ COMPARATIVA SELECCIONADA INICIALMENTE POR DEFECTO (value=True)
+    vista_tabla_dh = st.checkbox("Mostrar Matriz Comparativa", value=True)
 
   if not df_dh_todos.empty and meses_tendencia_filtrados:
     fig_dh = make_subplots(specs=[[{"secondary_y": True}]])
@@ -984,7 +996,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.plotly_chart(fig_dh, use_container_width=True)
 
     if vista_tabla_dh:
-      # Construcción de la matriz ordenada cronológicamente con indicadores de flecha y promedio histórico en %, APs y LEs
+      # Construcción de la matriz ordenada cronológicamente con indicadores dobles (PROMEDIO + VS MES ANTERIOR)
       df_matrix = pd.DataFrame()
       df_matrix["Label_DH"] = df_dh_todos["Label_DH"].drop_duplicates().sort_values(key=lambda x: x.str.extract(r'(\d+)')[0].astype(int))
 
@@ -1005,6 +1017,17 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       curr_col_ap = f"APs ({curr_m_name})"
       curr_col_le = f"LEs ({curr_m_name})"
 
+      # Identificar el mes inmediatamente anterior para la comparación directa
+      idx_curr_m = [i for i, (y, m) in enumerate(meses_tendencia) if y == año_sel and m == mes_sel]
+      if idx_curr_m and idx_curr_m[0] > 0:
+          prev_m_tuple = meses_tendencia[idx_curr_m[0] - 1]
+          prev_m_name = nombres_meses.get(prev_m_tuple[1]).title()
+          prev_m_pct_col = f"% AP ({prev_m_name})"
+          prev_m_ap_col = f"APs ({prev_m_name})"
+          prev_m_le_col = f"LEs ({prev_m_name})"
+      else:
+          prev_m_pct_col = prev_m_ap_col = prev_m_le_col = None
+
       prev_cols_pct = [f"% AP ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
       prev_cols_ap = [f"APs ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
       prev_cols_le = [f"LEs ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
@@ -1019,33 +1042,77 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                   if "% AP" in col:
                       if col == curr_col_pct:
                           prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_pct if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
+                          prom_html = ""
                           if prev_vals:
                               avg_prev = sum(prev_vals) / len(prev_vals)
-                              arrow = "⬆️" if val >= avg_prev else "⬇️"
-                              color = "#15803d" if val >= avg_prev else "#b91c1c"
-                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{val:.2f}%</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {avg_prev:.2f}%</span></div>'
-                          else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{val:.2f}%</b></div>'
-                      else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{val:.2f}%</div>'
+                              arrow_p = "⬆️" if val >= avg_prev else "⬇️"
+                              color_p = "#15803d" if val >= avg_prev else "#b91c1c"
+                              prom_html = f'<span style="font-size:10px; color:{color_p}; font-weight:bold;">{arrow_p} Prom: {avg_prev:.2f}%</span>'
+                          
+                          ant_html = ""
+                          if prev_m_pct_col and prev_m_pct_col in df_matrix.columns and pd.notna(df_matrix.at[idx, prev_m_pct_col]):
+                              val_ant = df_matrix.at[idx, prev_m_pct_col]
+                              arrow_a = "⬆️" if val >= val_ant else "⬇️"
+                              color_a = "#15803d" if val >= val_ant else "#b91c1c"
+                              ant_html = f'<span style="font-size:10px; color:{color_a}; font-weight:bold;">{arrow_a} vs Ant: {val_ant:.2f}%</span>'
+                          
+                          sub_info = "<br>".join([h for h in [prom_html, ant_html] if h])
+                          if sub_info:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.2;"><b>{val:.2f}%</b><br>{sub_info}</div>'
+                          else:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{val:.2f}%</b></div>'
+                      else:
+                          df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{val:.2f}%</div>'
+
                   elif "APs (" in col:
                       if col == curr_col_ap:
                           prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_ap if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
+                          prom_html = ""
                           if prev_vals:
                               avg_prev = sum(prev_vals) / len(prev_vals)
-                              arrow = "⬆️" if val >= avg_prev else "⬇️"
-                              color = "#15803d" if val >= avg_prev else "#b91c1c"
-                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{int(val):,}</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {int(round(avg_prev)):,}</span></div>'
-                          else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
-                      else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
+                              arrow_p = "⬆️" if val >= avg_prev else "⬇️"
+                              color_p = "#15803d" if val >= avg_prev else "#b91c1c"
+                              prom_html = f'<span style="font-size:10px; color:{color_p}; font-weight:bold;">{arrow_p} Prom: {int(round(avg_prev))}</span>'
+                          
+                          ant_html = ""
+                          if prev_m_ap_col and prev_m_ap_col in df_matrix.columns and pd.notna(df_matrix.at[idx, prev_m_ap_col]):
+                              val_ant = df_matrix.at[idx, prev_m_ap_col]
+                              arrow_a = "⬆️" if val >= val_ant else "⬇️"
+                              color_a = "#15803d" if val >= val_ant else "#b91c1c"
+                              ant_html = f'<span style="font-size:10px; color:{color_a}; font-weight:bold;">{arrow_a} vs Ant: {int(val_ant)}</span>'
+                          
+                          sub_info = "<br>".join([h for h in [prom_html, ant_html] if h])
+                          if sub_info:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.2;"><b>{int(val):,}</b><br>{sub_info}</div>'
+                          else:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
+                      else:
+                          df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
+
                   elif "LEs (" in col:
                       if col == curr_col_le:
                           prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_le if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
+                          prom_html = ""
                           if prev_vals:
                               avg_prev = sum(prev_vals) / len(prev_vals)
-                              arrow = "⬆️" if val >= avg_prev else "⬇️"
-                              color = "#15803d" if val >= avg_prev else "#b91c1c"
-                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{int(val):,}</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {int(round(avg_prev)):,}</span></div>'
-                          else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
-                      else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
+                              arrow_p = "⬆️" if val >= avg_prev else "⬇️"
+                              color_p = "#15803d" if val >= avg_prev else "#b91c1c"
+                              prom_html = f'<span style="font-size:10px; color:{color_p}; font-weight:bold;">{arrow_p} Prom: {int(round(avg_prev)):,}</span>'
+                          
+                          ant_html = ""
+                          if prev_m_le_col and prev_m_le_col in df_matrix.columns and pd.notna(df_matrix.at[idx, prev_m_le_col]):
+                              val_ant = df_matrix.at[idx, prev_m_le_col]
+                              arrow_a = "⬆️" if val >= val_ant else "⬇️"
+                              color_a = "#15803d" if val >= val_ant else "#b91c1c"
+                              ant_html = f'<span style="font-size:10px; color:{color_a}; font-weight:bold;">{arrow_a} vs Ant: {int(val_ant):,}</span>'
+                          
+                          sub_info = "<br>".join([h for h in [prom_html, ant_html] if h])
+                          if sub_info:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.2;"><b>{int(val):,}</b><br>{sub_info}</div>'
+                          else:
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
+                      else:
+                          df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
 
       html_table = df_matrix_html.to_html(escape=False, index=False)
       html_table = html_table.replace('<table border="1" class="dataframe">', '<table style="width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: sans-serif; background-color: #ffffff; border: 1px solid #cbd5e1; margin-bottom: 20px;">')
