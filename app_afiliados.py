@@ -516,11 +516,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
               & (x["DECISION"].isin(["A", "D", "P", "C"]))
           ).sum(),
           "NO GESTIONADO": (
-              (x["ESTADO"] == "LEAD EFECTIVO")
-              & (
-                  (x["DECISION"] == "-")
-                  | (~x["DECISION"].isin(["A", "D", "P", "C"]))
-              )
+              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "-")
           ).sum(),
           "Declinado": (
               (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "D")
