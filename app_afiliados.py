@@ -511,11 +511,26 @@ if not df_ventas.empty and len(df_ventas.columns) > 45:
                   "NAN",
               ])
           ).sum(),
-          "EVALUADO": (x["DECISION"] != "-").sum(),
-          "NO GESTIONADO": (x["DECISION"] == "-").sum(),
-          "Declinado": (x["DECISION"] == "D").sum(),
-          "Cancelado": (x["DECISION"] == "C").sum(),
-          "Pendiente": (x["DECISION"] == "P").sum(),
+          "EVALUADO": (
+              (x["ESTADO"] == "LEAD EFECTIVO")
+              & (x["DECISION"].isin(["A", "D", "P", "C"]))
+          ).sum(),
+          "NO GESTIONADO": (
+              (x["ESTADO"] == "LEAD EFECTIVO")
+              & (
+                  (x["DECISION"] == "-")
+                  | (~x["DECISION"].isin(["A", "D", "P", "C"]))
+              )
+          ).sum(),
+          "Declinado": (
+              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "D")
+          ).sum(),
+          "Cancelado": (
+              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "C")
+          ).sum(),
+          "Pendiente": (
+              (x["ESTADO"] == "LEAD EFECTIVO") & (x["DECISION"] == "P")
+          ).sum(),
       }))
       .reset_index()
       .rename(columns={"F_VTA": "Fecha"})
