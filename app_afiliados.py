@@ -293,7 +293,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
 
   # ETIQUETADO DE DÍA HÁBIL (DH)
   df_cal["Día_Hábil"] = [f"DH {i}" for i in range(1, len(df_cal) + 1)]
-  dias_habiles_disp = df_cal["Día_Hábil"].tolist()
 
   dias_semana_sel = st.sidebar.multiselect("Día de la Semana", options=list(dias_nombres_map.values()), default=[])
   if dias_semana_sel:
@@ -971,7 +970,6 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     df_m_dh = generar_serie_dia_habil(y_m, m_m, df_ventas)
     if not df_m_dh.empty: df_dh_todos = pd.concat([df_dh_todos, df_m_dh], ignore_index=True)
 
-  # FILTROS DE INDICADORES, DÍAS HÁBILES Y MESES
   col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns([1.3, 1.3, 1.2, 1.0])
   with col_ctrl1:
     metricas_dh_sel = st.multiselect(
@@ -988,7 +986,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     )
     meses_tendencia_filtrados = [opciones_meses_dh[k] for k in meses_dh_nombres_sel if k in opciones_meses_dh]
   with col_ctrl3:
-    dh_lista_disp = sorted(df_dh_todos["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', x).group())) if not df_dh_todos.empty else []
+    dh_lista_disp = sorted(df_dh_todos["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', str(x)).group()) if re.search(r'\d+', str(x)) else 0) if not df_dh_todos.empty else []
     dh_filtro_m1 = st.multiselect("Filtrar Día Hábil (DH):", options=dh_lista_disp, default=[])
   with col_ctrl4:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
@@ -1025,9 +1023,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.plotly_chart(fig_dh, use_container_width=True)
 
     if vista_tabla_dh:
-      # Matriz comparativa por Día Hábil en APs
-      df_matrix = pd.DataFrame()
-      df_matrix["Label_DH"] = df_dh_todos_plot["Label_DH"].drop_duplicates().sort_values(key=lambda x: int(re.search(r'\d+', str(x)).group()))
+      # CORRECCIÓN DE ORDENACIÓN SEGURA DE ETANQUETAS DH
+      dh_labels_m1 = sorted(df_dh_todos_plot["Label_DH"].dropna().unique().tolist(), key=lambda x: int(re.search(r'\d+', str(x)).group()) if re.search(r'\d+', str(x)) else 0)
+      df_matrix = pd.DataFrame({"Label_DH": dh_labels_m1})
 
       for y_m, m_m in meses_tendencia_filtrados:
           m_name = nombres_meses.get(m_m, str(m_m)).title()
@@ -1239,7 +1237,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     )
 
   # =========================================================================
-  # 🔄 NUEVO MÓDULO: ANÁLISIS DE FUNNEL & ESTADO DE LEADS POR DÍA HÁBIL
+  # 🔄 MÓDULO 2: ANÁLISIS DE FUNNEL & ESTADO DE LEADS POR DÍA HÁBIL
   # =========================================================================
   st.divider()
   st.subheader("🔄 Análisis de Funnel & Estado de Leads por Día Hábil (ÚLTIMOS 4 MESES)")
@@ -1332,7 +1330,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     )
     meses_fun_filtrados = [opciones_meses_fun[k] for k in meses_fun_sel if k in opciones_meses_fun]
   with col_f3:
-    dh_lista_fun_disp = sorted(df_dh_funnel["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', x).group())) if not df_dh_funnel.empty else []
+    dh_lista_fun_disp = sorted(df_dh_funnel["Label_DH"].drop_duplicates().tolist(), key=lambda x: int(re.search(r'\d+', str(x)).group()) if re.search(r'\d+', str(x)) else 0) if not df_dh_funnel.empty else []
     dh_filtro_funnel = st.multiselect("Filtrar Día Hábil (DH):", options=dh_lista_fun_disp, default=[], key="dh_funnel_select")
   with col_f4:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
@@ -1376,8 +1374,8 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
 
     # 2. Matriz Comparativa Detallada de Funnel (con % diferenciales vs Prom y vs Ant en Noviembre)
     if vista_matriz_funnel:
-      df_matrix_f = pd.DataFrame()
-      df_matrix_f["Label_DH"] = df_dh_funnel_plot["Label_DH"].drop_duplicates().sort_values(key=lambda x: int(re.search(r'\d+', str(x)).group()))
+      dh_labels_m2 = sorted(df_dh_funnel_plot["Label_DH"].dropna().unique().tolist(), key=lambda x: int(re.search(r'\d+', str(x)).group()) if re.search(r'\d+', str(x)) else 0)
+      df_matrix_f = pd.DataFrame({"Label_DH": dh_labels_m2})
 
       for y_m, m_m in meses_fun_filtrados:
         m_name = nombres_meses.get(m_m, str(m_m)).title()
