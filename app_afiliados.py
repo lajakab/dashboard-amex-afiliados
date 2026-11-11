@@ -1282,8 +1282,6 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
                                 df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.2;"><b>{int(val):,}</b><br>{sub_info}</div>'
                             else:
                                 df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
-                        else:
-                            df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
 
                     elif "LEs (" in col:
                         if col == curr_col_le:
@@ -1627,7 +1625,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO & CORREGIDO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CORREGIDO)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1798,9 +1796,9 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   ap_totales_op = ap_mes_op + ap_cos_op
   media_ap_asesor = ap_totales_op / agt_activos_count
 
-  # % Evaluado de la operación
-  if not df_vta_op.empty and "DECISION" in df_vta_op.columns:
-    evaluados_op = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO") & (df_vta_op["DECISION"].astype(str).str.strip().str.upper().isin(["A", "D", "P", "C"]))).sum()
+  # % Evaluado de la operación corregido sintácticamente
+  if not df_vta_op.empty and "DECISION" in df_vta_op.columns and "ESTADO" in df_vta_op.columns:
+    evaluados_op = float(((df_vta_op["ESTADO"] == "LEAD EFECTIVO") & (df_vta_op["DECISION"].astype(str).str.strip().str.upper().isin(["A", "D", "P", "C"]))).sum())
   else:
     evaluados_op = 0.0
 
@@ -1962,7 +1960,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
       pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
 
-      # PUNTOS CALCULADOS DIRECTAMENTE DE LAS AP TOTALES DEL MES (AP MES + AP COSECHA)
       pts_val = float(ap_tot)
 
       pct_cump_puntos = (pts_val / 11.0) if pts_val > 0 else 0.0
