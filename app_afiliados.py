@@ -588,6 +588,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
       vmin, vmax = 0, 1
     min_max_dict[col] = (vmin, vmax)
 
+  # FORMATO CONDICIONAL CORREGIDO PARA LA TABLA INICIAL GENERAL
   def aplicar_formatos_condicionales(df_input):
     styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
     for idx, row in df_input.iterrows():
@@ -613,9 +614,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                 vmin, vmax = min_max_dict["LE"]
                 bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
                 if bg: cell_style += " " + bg
-            elif col in ["% LE", "Prom", "% AP Día", "% AP Acum M", "% AP Tot", "% Eval"]:
+            elif col in ["% LE", "Prom", "% AP Día", "% Eval"]:
+              # Verde para valores altos, Naranja intermedio, Rojo para valores bajos
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
+              if bg: cell_style += " " + bg
+            elif col in ["% AP Acum M", "% AP Tot"]:
+              # Verde para valores altos, Blanco para valores bajos
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
               if bg: cell_style += " " + bg
             elif col == "% REM/RECH":
               vmin, vmax = min_max_dict[col]
@@ -930,17 +937,31 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     df_m_dh = generar_serie_dia_habil(y_m, m_m, df_ventas)
     if not df_m_dh.empty: df_dh_todos = pd.concat([df_dh_todos, df_m_dh], ignore_index=True)
 
-  col_ctrl1, col_ctrl2 = st.columns([2, 1])
+  # FILTROS DE INDICADORES Y MESES INDEPENDIENTES
+  col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.5, 1])
   with col_ctrl1:
-    metricas_dh_sel = st.multiselect("Filtro de Capas Visuales:", options=["% Conversión AP Mes Acumulada", "Aprobadas (AP MES) Acumuladas", "Leads Efectivos Acumulados"], default=["% Conversión AP Mes Acumulada", "Aprobadas (AP MES) Acumuladas", "Leads Efectivos Acumulados"])
+    metricas_dh_sel = st.multiselect(
+        "Filtro de Indicadores:",
+        options=["% Conversión AP Mes Acumulada", "Aprobadas (AP MES) Acumuladas", "Leads Efectivos Acumulados"],
+        default=["% Conversión AP Mes Acumulada", "Aprobadas (AP MES) Acumuladas", "Leads Efectivos Acumulados"]
+    )
   with col_ctrl2:
-    vista_tabla_dh = st.checkbox("Mostrar Matriz Comparativa de Datos en Tabla", value=False)
+    opciones_meses_dh = {f"{nombres_meses.get(m, str(m)).title()} ({y})": (y, m) for y, m in meses_tendencia}
+    meses_dh_nombres_sel = st.multiselect(
+        "Filtro de Meses a Comparar:",
+        options=list(opciones_meses_dh.keys()),
+        default=list(opciones_meses_dh.keys())
+    )
+    meses_tendencia_filtrados = [opciones_meses_dh[k] for k in meses_dh_nombres_sel if k in opciones_meses_dh]
+  with col_ctrl3:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    vista_tabla_dh = st.checkbox("Mostrar Matriz Comparativa", value=False)
 
-  if not df_dh_todos.empty:
+  if not df_dh_todos.empty and meses_tendencia_filtrados:
     fig_dh = make_subplots(specs=[[{"secondary_y": True}]])
     colores_dh = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
 
-    for idx, (y_m, m_m) in enumerate(meses_tendencia):
+    for idx, (y_m, m_m) in enumerate(meses_tendencia_filtrados):
       sub_dh = df_dh_todos[(df_dh_todos["Año"] == y_m) & (df_dh_todos["Mes"] == m_m)]
       if sub_dh.empty: continue
       nombre_m_str = nombres_meses.get(m_m, str(m_m)).title()
@@ -963,11 +984,11 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.plotly_chart(fig_dh, use_container_width=True)
 
     if vista_tabla_dh:
-      # Construcción de la matriz ordenada cronológicamente con indicadores de flecha y promedio histórico
+      # Construcción de la matriz ordenada cronológicamente con indicadores de flecha y promedio histórico en %, APs y LEs
       df_matrix = pd.DataFrame()
       df_matrix["Label_DH"] = df_dh_todos["Label_DH"].drop_duplicates().sort_values(key=lambda x: x.str.extract(r'(\d+)')[0].astype(int))
 
-      for y_m, m_m in meses_tendencia:
+      for y_m, m_m in meses_tendencia_filtrados:
           m_name = nombres_meses.get(m_m, str(m_m)).title()
           sub_df = df_dh_todos[(df_dh_todos["Año"] == y_m) & (df_dh_todos["Mes"] == m_m)]
           mapping_ap_pct = dict(zip(sub_df["Label_DH"], sub_df["%_AP_MES_Acum"]))
@@ -978,11 +999,15 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
           if "Aprobadas (AP MES) Acumuladas" in metricas_dh_sel: df_matrix[f"APs ({m_name})"] = df_matrix["Label_DH"].map(mapping_ap_vol)
           if "Leads Efectivos Acumulados" in metricas_dh_sel: df_matrix[f"LEs ({m_name})"] = df_matrix["Label_DH"].map(mapping_le_vol)
 
-      # CORRECCIÓN DE ERROR DE TIPO PANDAS (CAST A OBJECT ANTES DE ASIGNAR CADENAS HTML):
       df_matrix_html = df_matrix.astype(object)
       curr_m_name = nombres_meses.get(mes_sel).title()
       curr_col_pct = f"% AP ({curr_m_name})"
+      curr_col_ap = f"APs ({curr_m_name})"
+      curr_col_le = f"LEs ({curr_m_name})"
+
       prev_cols_pct = [f"% AP ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
+      prev_cols_ap = [f"APs ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
+      prev_cols_le = [f"LEs ({nombres_meses.get(m).title()})" for y, m in meses_tendencia if not (y == año_sel and m == mes_sel)]
 
       for col in df_matrix.columns:
           if col == "Label_DH": continue
@@ -993,7 +1018,7 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
               else:
                   if "% AP" in col:
                       if col == curr_col_pct:
-                          prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_pct if pd.notna(df_matrix.at[idx, pc])]
+                          prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_pct if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
                           if prev_vals:
                               avg_prev = sum(prev_vals) / len(prev_vals)
                               arrow = "⬆️" if val >= avg_prev else "⬇️"
@@ -1001,7 +1026,26 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                               df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{val:.2f}%</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {avg_prev:.2f}%</span></div>'
                           else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{val:.2f}%</b></div>'
                       else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{val:.2f}%</div>'
-                  else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
+                  elif "APs (" in col:
+                      if col == curr_col_ap:
+                          prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_ap if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
+                          if prev_vals:
+                              avg_prev = sum(prev_vals) / len(prev_vals)
+                              arrow = "⬆️" if val >= avg_prev else "⬇️"
+                              color = "#15803d" if val >= avg_prev else "#b91c1c"
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{int(val):,}</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {int(round(avg_prev)):,}</span></div>'
+                          else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
+                      else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
+                  elif "LEs (" in col:
+                      if col == curr_col_le:
+                          prev_vals = [df_matrix.at[idx, pc] for pc in prev_cols_le if pc in df_matrix.columns and pd.notna(df_matrix.at[idx, pc])]
+                          if prev_vals:
+                              avg_prev = sum(prev_vals) / len(prev_vals)
+                              arrow = "⬆️" if val >= avg_prev else "⬇️"
+                              color = "#15803d" if val >= avg_prev else "#b91c1c"
+                              df_matrix_html.at[idx, col] = f'<div style="text-align:center; line-height:1.3;"><b>{int(val):,}</b><br><span style="font-size:10px; color:{color}; font-weight:bold;">{arrow} Prom: {int(round(avg_prev)):,}</span></div>'
+                          else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;"><b>{int(val):,}</b></div>'
+                      else: df_matrix_html.at[idx, col] = f'<div style="text-align:center;">{int(val):,}</div>'
 
       html_table = df_matrix_html.to_html(escape=False, index=False)
       html_table = html_table.replace('<table border="1" class="dataframe">', '<table style="width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: sans-serif; background-color: #ffffff; border: 1px solid #cbd5e1; margin-bottom: 20px;">')
