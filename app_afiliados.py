@@ -117,6 +117,35 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Interpolación en 2 puntos
+def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
+  if pd.isna(val) or vmin == vmax:
+    return ""
+  norm = (val - vmin) / (vmax - vmin)
+  norm = max(0.0, min(1.0, norm))
+  r = int(rgb_low[0] + norm * (rgb_high[0] - rgb_low[0]))
+  g = int(rgb_low[1] + norm * (rgb_high[1] - rgb_low[1]))
+  b = int(rgb_low[2] + norm * (rgb_high[2] - rgb_low[2]))
+  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
+
+# Interpolación en 3 puntos con Naranja Intermedio
+def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
+  if pd.isna(val) or vmin == vmax:
+    return ""
+  norm = (val - vmin) / (vmax - vmin)
+  norm = max(0.0, min(1.0, norm))
+  if norm <= 0.5:
+    t = norm / 0.5
+    r = int(rgb_low[0] + t * (rgb_mid[0] - rgb_low[0]))
+    g = int(rgb_low[1] + t * (rgb_mid[1] - rgb_low[1]))
+    b = int(rgb_low[2] + t * (rgb_mid[2] - rgb_low[2]))
+  else:
+    t = (norm - 0.5) / 0.5
+    r = int(rgb_mid[0] + t * (rgb_high[0] - rgb_mid[0]))
+    g = int(rgb_mid[1] + t * (rgb_high[1] - rgb_mid[1]))
+    b = int(rgb_mid[2] + t * (rgb_high[2] - rgb_mid[2]))
+  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
+
 # 1. Termómetro Tipo Pila Segmentada
 def render_pila_bar(pct):
   c1 = "#ef4444" if pct > 0 else "#e2e8f0"
@@ -145,35 +174,6 @@ def render_gauge_svg(pct):
             <line x1="50" y1="42" x2="{nx:.1f}" y2="{ny:.1f}" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/>
         </svg>
     </div>"""
-
-# Interpolación en 2 puntos (Blanco a Verde)
-def interpolate_color_2pt(val, vmin, vmax, rgb_low, rgb_high):
-  if pd.isna(val) or vmin == vmax:
-    return ""
-  norm = (val - vmin) / (vmax - vmin)
-  norm = max(0.0, min(1.0, norm))
-  r = int(rgb_low[0] + norm * (rgb_high[0] - rgb_low[0]))
-  g = int(rgb_low[1] + norm * (rgb_high[1] - rgb_low[1]))
-  b = int(rgb_low[2] + norm * (rgb_high[2] - rgb_low[2]))
-  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
-
-# Interpolación en 3 puntos con Naranja Intermedio
-def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
-  if pd.isna(val) or vmin == vmax:
-    return ""
-  norm = (val - vmin) / (vmax - vmin)
-  norm = max(0.0, min(1.0, norm))
-  if norm <= 0.5:
-    t = norm / 0.5
-    r = int(rgb_low[0] + t * (rgb_mid[0] - rgb_low[0]))
-    g = int(rgb_low[1] + t * (rgb_mid[1] - rgb_low[1]))
-    b = int(rgb_low[2] + t * (rgb_mid[2] - rgb_low[2]))
-  else:
-    t = (norm - 0.5) / 0.5
-    r = int(rgb_mid[0] + t * (rgb_high[0] - rgb_mid[0]))
-    g = int(rgb_mid[1] + t * (rgb_high[1] - rgb_mid[1]))
-    b = int(rgb_mid[2] + t * (rgb_high[2] - rgb_mid[2]))
-  return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
 
 @st.cache_data
 def cargar_pestanas():
@@ -578,24 +578,26 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
   rgb_red = (248, 140, 140)
   rgb_white = (255, 255, 255)
 
-  mask_hasta_ayer = df_final["Fecha"] < date.today()
-  df_pasado_vals = df_final[mask_hasta_ayer]
+  # CÁLCULO DE VMIN Y VMAX DIRECTAMENTE SOBRE DF_VISTA HASTA FECHA_CORTE
+  mask_hasta_corte = df_final["Fecha"] <= fecha_corte
+  df_vista_pasado = df_vista.iloc[:len(df_final)][mask_hasta_corte]
 
   min_max_dict = {}
-  for col in ["LE", "% LE", "% REM/RECH", "Prom", "SPH", "% AP Día", "% AP Acum M", "% AP Tot", "No Gest", "% Eval"]:
-    orig_col = "Lead Efectivo" if col == "LE" else "NO GESTIONADO" if col == "No Gest" else "EVALUADO" if col == "% Eval" else col 
+  for col in df_vista.columns:
+    if col == "Día": continue
     if col == "LE":
-      df_no_sab = df_pasado_vals[pd.to_datetime(df_pasado_vals["Fecha"]).dt.dayofweek != 5]
-      vmin = df_no_sab["Lead Efectivo"].min() if not df_no_sab.empty else 0
-      vmax = df_no_sab["Lead Efectivo"].max() if not df_no_sab.empty else 1
-    elif not df_pasado_vals.empty and orig_col in df_pasado_vals.columns:
-      vmin = df_pasado_vals[orig_col].min()
-      vmax = df_pasado_vals[orig_col].max()
+      df_no_sab = df_vista_pasado[~df_vista_pasado["Día"].astype(str).str.contains("sáb", case=False)]
+      vmin = df_no_sab["LE"].min() if not df_no_sab.empty else 0
+      vmax = df_no_sab["LE"].max() if not df_no_sab.empty else 1
+    elif not df_vista_pasado.empty and col in df_vista_pasado.columns:
+      s = pd.to_numeric(df_vista_pasado[col], errors="coerce")
+      vmin = s.min()
+      vmax = s.max()
     else:
       vmin, vmax = 0, 1
     min_max_dict[col] = (vmin, vmax)
 
-  # FORMATO CONDICIONAL CORREGIDO PARA LA TABLA INICIAL GENERAL
+  # FORMATO CONDICIONAL CORREGIDO Y AJUSTADO SEGÚN ESPECIFICACIÓN EXACTA
   def aplicar_formatos_condicionales(df_input):
     styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
     for idx, row in df_input.iterrows():
@@ -606,13 +608,14 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
         continue
       es_ultimo_ap = (ultimo_dia_ap != "N/A" and ultimo_dia_ap in dia_str.lower())
       row_base_style = ("background-color: #dbeafe; font-weight: bold; border-left: 3px solid #2563eb; " if es_ultimo_ap else "")
-      corresponde_pasado = False
+      
+      corresponde_hasta_corte = False
       if idx < len(df_final):
-        corresponde_pasado = df_final.iloc[idx]["Fecha"] < date.today()
+        corresponde_hasta_corte = (df_final.iloc[idx]["Fecha"] <= fecha_corte)
 
       for col in df_input.columns:
         cell_style = base_align + row_base_style
-        if corresponde_pasado:
+        if corresponde_hasta_corte:
           val = row[col]
           if isinstance(val, (int, float, np.number)):
             if col == "LE":
@@ -622,18 +625,24 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
                 bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
                 if bg: cell_style += " " + bg
             elif col in ["% LE", "Prom"]:
+              # Verde (alto) -> Naranja -> Rojo (bajo)
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
             elif col in ["% AP Día", "% Eval"]:
-              # VERDE (alto) A BLANCO (bajo) - SIN ROJO
+              # VERDE (mayor) -> NARANJA -> ROJO (menor)
+              vmin, vmax = min_max_dict[col]
+              bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
+              if bg: cell_style += " " + bg
+            elif col in ["% AP Acum M", "% AP Tot"]:
+              # VERDE INTENSO (mayor) -> VERDE CLARO / BLANCO (menor)
               vmin, vmax = min_max_dict[col]
               bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
               if bg: cell_style += " " + bg
-            elif col in ["% AP Acum M", "% AP Tot"]:
-              # VERDE (alto) A ROJO (bajo) - DE MAYOR A MENOR
+            elif col in ["% Decl", "% Declinado"]:
+              # ROJO INTENSO (mayor/peor) -> ROJO TENUE / BLANCO (menor/mejor)
               vmin, vmax = min_max_dict[col]
-              bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
+              bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_red)
               if bg: cell_style += " " + bg
             elif col == "% REM/RECH":
               vmin, vmax = min_max_dict[col]
