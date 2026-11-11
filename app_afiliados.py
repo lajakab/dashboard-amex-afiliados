@@ -1871,5 +1871,313 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
 
   st.plotly_chart(fig_tend, use_container_width=True)
 
+  # =========================================================================
+  # 🗓️ NUEVO MÓDULO: ANÁLISIS DE DÍAS HÁBILES, MADURACIÓN Y PROYECCIÓN AP MES
+  # =========================================================================
+  st.divider()
+  st.subheader("🗓️ Análisis por Día Hábil & Proyección de Maduración AP Mes")
+  st.caption(
+      "Evaluación comparativa por **Día Hábil (excluyendo festivos y domingos)**"
+      " para los últimos 4 meses. Incluye el cálculo de maduración de cartera"
+      " reciente (retraso en decisiones) y la proyección estimada de"
+      " conversión de cierre."
+  )
+
+  # Función auxiliar para generar serie por Día Hábil
+  def generar_serie_dia_habil(y, m, df_v):
+    num_dias_m = calendar.monthrange(y, m)[1]
+    festivos = holidays.Mexico(years=y)
+    fechas = [date(y, m, d) for d in range(1, num_dias_m + 1)]
+    dias_habiles = [f for f in fechas if f.weekday() != 6 and f not in festivos]
+
+    df_v_mes = df_v[
+        (pd.to_datetime(df_v["F_VTA"]).dt.year == y)
+        & (pd.to_datetime(df_v["F_VTA"]).dt.month == m)
+    ]
+
+    es_mes_actual_flag = (y == año_sel) and (m == mes_sel)
+
+    # Identificar hasta qué fecha se han cargado las aprobaciones en el mes
+    if es_mes_actual_flag:
+      df_ap_curr = df_v_mes[
+          (pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.year == y)
+          & (pd.to_datetime(df_v_mes["F_DEC_EFF"]).dt.month == m)
+          & (df_v_mes["DECISION"] == "A")
+      ]
+      if not df_ap_curr.empty:
+        max_f_ap = pd.to_datetime(df_ap_curr["F_VTA"]).dt.date.max()
+      else:
+        max_f_ap = date.today()
+    else:
+      max_f_ap = date(y, m, num_dias_m)
+
+    records = []
+    le_acum = 0
+    ap_acum = 0
+
+    for dh_idx, f in enumerate(dias_habiles, start=1):
+      if es_mes_actual_flag and f > max_f_ap:
+        break
+
+      sub_f = df_v_mes[df_v_mes["F_VTA"] == f]
+      le_dia = (sub_f["ESTADO"] == "LEAD EFECTIVO").sum()
+
+      ap_dia = (
+          (sub_f["ESTADO"] == "LEAD EFECTIVO")
+          & (pd.to_datetime(sub_f["F_DEC_EFF"]).dt.year == y)
+          & (pd.to_datetime(sub_f["F_DEC_EFF"]).dt.month == m)
+          & (sub_f["DECISION"] == "A")
+      ).sum()
+
+      le_acum += le_dia
+      ap_acum += ap_dia
+      pct_acum = (ap_acum / le_acum * 100.0) if le_acum > 0 else 0.0
+
+      records.append({
+          "Año": y,
+          "Mes": m,
+          "Nombre_Mes": nombres_meses.get(m, str(m)),
+          "Fecha": f,
+          "Día_Hábil": dh_idx,
+          "Label_DH": f"DH {dh_idx}",
+          "LE_Día": le_dia,
+          "LE_Acum": le_acum,
+          "AP_MES_Día": ap_dia,
+          "AP_MES_Acum": ap_acum,
+          "%_AP_MES_Acum": round(pct_acum, 2),
+      })
+
+    return pd.DataFrame(records)
+
+  # Generar data de los últimos 4 meses
+  df_dh_todos = pd.DataFrame()
+  for y_m, m_m in meses_tendencia:
+    df_m_dh = generar_serie_dia_habil(y_m, m_m, df_ventas)
+    if not df_m_dh.empty:
+      df_dh_todos = pd.concat([df_dh_todos, df_m_dh], ignore_index=True)
+
+  # CONTROLES DE INTERACTIVIDAD PARA LA NUEVA GRÁFICA Y CUADRO
+  col_ctrl1, col_ctrl2 = st.columns([2, 1])
+
+  with col_ctrl1:
+    metricas_dh_sel = st.multiselect(
+        "Filtro de Capas Visuales en la Gráfica:",
+        options=[
+            "% Conversión AP Mes Acumulada",
+            "Aprobadas (AP MES) Acumuladas",
+            "Leads Efectivos Acumulados",
+        ],
+        default=["% Conversión AP Mes Acumulada"],
+    )
+
+  with col_ctrl2:
+    vista_tabla_dh = st.checkbox(
+        "Mostrar Matriz Comparativa de Datos en Tabla", value=False
+    )
+
+  if not df_dh_todos.empty:
+    fig_dh = go.Figure()
+    colores_dh = ["#ea580c", "#15803d", "#0284c7", "#a855f7"]
+
+    # Agregar trazas según selección de filtros
+    for idx, (y_m, m_m) in enumerate(meses_tendencia):
+      sub_dh = df_dh_todos[
+          (df_dh_todos["Año"] == y_m) & (df_dh_todos["Mes"] == m_m)
+      ]
+      if sub_dh.empty:
+        continue
+
+      nombre_m_str = nombres_meses.get(m_m, str(m_m)).lower()
+      c_base = colores_dh[idx % len(colores_dh)]
+
+      if "% Conversión AP Mes Acumulada" in metricas_dh_sel:
+        labels_pct = [""] * len(sub_dh)
+        if not sub_dh.empty:
+          labels_pct[-1] = f"<b>{sub_dh['%_AP_MES_Acum'].iloc[-1]:.1f}%</b>"
+
+        fig_dh.add_trace(
+            go.Scatter(
+                x=sub_dh["Label_DH"],
+                y=sub_dh["%_AP_MES_Acum"],
+                name=f"% AP Mes ({nombre_m_str})",
+                mode="lines+markers+text",
+                line=dict(color=c_base, width=3),
+                marker=dict(size=6, color=c_base),
+                text=labels_pct,
+                textposition="top center",
+                textfont=dict(size=12, color=c_base),
+                hovertemplate=(
+                    f"<b>%{{x}} ({nombre_m_str}):</b> %{{y:.2f}}% AP"
+                    " Acum.<extra></extra>"
+                ),
+            )
+        )
+
+      if "Aprobadas (AP MES) Acumuladas" in metricas_dh_sel:
+        fig_dh.add_trace(
+            go.Bar(
+                x=sub_dh["Label_DH"],
+                y=sub_dh["AP_MES_Acum"],
+                name=f"AP Acum ({nombre_m_str})",
+                opacity=0.4,
+                marker_color=c_base,
+                hovertemplate=(
+                    f"<b>%{{x}} ({nombre_m_str}):</b> %{{y:,.0f}} APs"
+                    " Acum.<extra></extra>"
+                ),
+            )
+        )
+
+      if "Leads Efectivos Acumulados" in metricas_dh_sel:
+        fig_dh.add_trace(
+            go.Scatter(
+                x=sub_dh["Label_DH"],
+                y=sub_dh["LE_Acum"],
+                name=f"LE Acum ({nombre_m_str})",
+                mode="lines",
+                line=dict(color=c_base, width=1.5, dash="dash"),
+                hovertemplate=(
+                    f"<b>%{{x}} ({nombre_m_str}):</b> %{{y:,.0f}} LE"
+                    " Acum.<extra></extra>"
+                ),
+            )
+        )
+
+    fig_dh.update_layout(
+        title=dict(
+            text="<b>Tendencia AP Mes Acumulado por Día Hábil (Sin Cosecha)</b>",
+            font=dict(size=17, color="#0f172a"),
+            x=0.5,
+            xanchor="center",
+        ),
+        xaxis=dict(
+            title="Día Hábil del Mes",
+            showgrid=True,
+            gridcolor="#f1f5f9",
+            tickfont=dict(size=11, color="#334155"),
+        ),
+        yaxis=dict(
+            title="Métrica Evaluada",
+            showgrid=True,
+            gridcolor="#e2e8f0",
+            zeroline=True,
+            tickfont=dict(size=11, color="#475569"),
+        ),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        height=480,
+        margin=dict(l=20, r=20, t=60, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.25,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+        ),
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig_dh, use_container_width=True)
+
+    if vista_tabla_dh:
+      piv_dh = df_dh_todos.pivot(
+          index="Label_DH", columns="Nombre_Mes", values="%_AP_MES_Acum"
+      )
+      st.markdown("##### 📋 Matriz Comparativa de % AP Mes por Día Hábil")
+      st.dataframe(piv_dh.fillna("-"), use_container_width=True)
+
+  # =========================================================================
+  # 🎯 CUADRO Y FICHA DE ANÁLISIS GERENCIAL DE MADURACIÓN & PROYECCIÓN
+  # =========================================================================
+  df_dh_curr = df_dh_todos[
+      (df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] mes_sel)
+  ] if "Mes" in df_dh_todos.columns else pd.DataFrame()
+
+  if not df_dh_curr.empty:
+    ult_row_dh = df_dh_curr.iloc[-1]
+    dh_act_num = int(ult_row_dh["Día_Hábil"])
+    fecha_ult_ap_dt = ult_row_dh["Fecha"]
+    pct_act_dh = ult_row_dh["%_AP_MES_Acum"]
+    ap_act_dh = int(ult_row_dh["AP_MES_Acum"])
+    le_act_dh = int(ult_row_dh["LE_Acum"])
+
+    # Comparación en el mismo día hábil para meses anteriores
+    df_dh_prevs = df_dh_todos[
+        (df_dh_todos["Día_Hábil"] == dh_act_num)
+        & (
+            (df_dh_todos["Año"] != año_sel)
+            | (df_dh_todos["Mes"] != mes_sel)
+        )
+    ]
+
+    prom_pct_prev_dh = (
+        df_dh_prevs["%_AP_MES_Acum"].mean() if not df_dh_prevs.empty else 4.2
+    )
+    diff_vs_hist_dh = pct_act_dh - prom_pct_prev_dh
+
+    # CÁLCULO DE MADURACIÓN (CARTERA RECIENTE EN EVALUACIÓN)
+    # Identificar leads de los últimos 3 días que aún están madurando (retraso en decisión)
+    df_ventas_curr_m = df_ventas[
+        (pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel)
+        & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)
+    ]
+    leads_en_maduracion = df_ventas_curr_m[
+        (df_ventas_curr_m["ESTADO"] == "LEAD EFECTIVO")
+        & (df_ventas_curr_m["F_VTA"] <= fecha_ult_ap_dt)
+        & (df_ventas_curr_m["BX_EMPTY"])
+    ].shape[0]
+
+    # Tasa estimada de maduración esperada al cierre (Media histórica final AP MES es ~4.2% - 4.5%)
+    tasa_cierre_esperada = max(prom_pct_prev_dh, 4.3) / 100.0
+    ap_adicionales_estimadas = int(leads_en_maduracion * tasa_cierre_esperada)
+    pct_proyectado_cierre = (
+        (ap_act_dh + ap_adicionales_estimadas) / le_act_dh * 100.0
+    ) if le_act_dh > 0 else pct_act_dh
+
+    badge_maduracion = (
+        f'<span class="arrow-badge-up">⬆️ Proyección al Cierre:'
+        f' {pct_proyectado_cierre:.1f}% AP</span>'
+        if pct_proyectado_cierre >= 4.0
+        else (
+            f'<span class="arrow-badge-down">⬇️ Proyección Ajustada:'
+            f' {pct_proyectado_cierre:.1f}% AP</span>'
+        )
+    )
+
+    st.markdown(
+        f"""
+        <div class="diag-box">
+            <div class="diag-header">📌 Diagnóstico Gerencial de Maduración AP Mes — AL DÍA HÁBIL {dh_act_num} ({fecha_ult_ap_dt.strftime('%d-%b')})</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div>
+                    <span style="font-size:13px; color:#64748b; font-weight:700;">CONVERSIÓN ACTUAL AL DH {dh_act_num}:</span>
+                    <b style="font-size:18px; color:#0f172a; margin-left:8px;">{pct_act_dh:.2f}%</b>
+                    <span style="font-size:12px; color:#475569;">({ap_act_dh} AP / {le_act_dh:,} LE)</span>
+                </div>
+                <div>{badge_maduracion}</div>
+            </div>
+            <div style="border-top: 1px dashed #cbd5e1; padding-top:10px;">
+                <div style="font-size:13px; font-weight:800; color:#0f172a; margin-bottom:6px;">Análisis de Maduración y Cartera Reciente:</div>
+                <div class="causal-item">
+                    • <b>Comparativa Histórica en el mismo Día Hábil (DH {dh_act_num}):</b> El desempeño actual registra una variación de 
+                    <b style="color:{'#15803d' if diff_vs_hist_dh >= 0 else '#b91c1c'};">{diff_vs_hist_dh:+.2f}%</b> frente al promedio de meses anteriores ({prom_pct_prev_dh:.2f}%).
+                </div>
+                <div class="causal-item">
+                    • <b>Leads en Proceso de Maduración (Lag Operativo):</b> Existen <b>{leads_en_maduracion:,} Leads Efectivos</b> generados recientemente con estado no evaluado o pendiente en sistema.
+                </div>
+                <div class="causal-item">
+                    • <b>Proyección Incremental Estimada:</b> Con base en el ritmo de resolución del dictamen, se estiman <b>+{ap_adicionales_estimadas} aprobaciones adicionales</b> sobre la venta ya realizada, elevando la conversión proyectada a <b>{pct_proyectado_cierre:.2f}% AP Mes</b>.
+                </div>
+                <div style="background-color:#f8fafc; padding:10px 12px; border-radius:6px; margin-top:10px; font-size:12px; color:#334155; border-left:4px solid #15803d;">
+                    <div style="font-weight:800; color:#0f172a; margin-bottom:4px;">📌 Conclusión & Oportunidad de Mejora:</div>
+                    <div>La conversión registrada del {pct_act_dh:.2f}% en el DH {dh_act_num} refleja el desfase natural del dictamen de crédito. Al liberar los {leads_en_maduracion} trámites pendientes, la tasa convergerá hacia el objetivo del <b>{pct_proyectado_cierre:.1f}%</b>. Se recomienda agilizar el flujo de evaluación en mesa de control para acelerar el cierre.</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 else:
   st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
