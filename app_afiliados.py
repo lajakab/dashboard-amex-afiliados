@@ -210,7 +210,6 @@ def cargar_pestanas():
 
 @st.cache_data
 def cargar_distribucion():
-  # Intenta cargar el archivo subido en Excel o Parquet con sus posibles nombres en GitHub
   nombres_posibles = [
       "DISTRIBUCION AMEX.xlsx",
       "DISTRIBUCIÓN AMEX.xlsx",
@@ -233,15 +232,45 @@ def cargar_distribucion():
 df_ventas, df_planta, df_ppto, df_malla = cargar_pestanas()
 df_distribucion = cargar_distribucion()
 
-# Normalizar y cruzar distribución en df_ventas por id_per
+# =========================================================================
+# ⚙️ PREPROCESAMIENTO GLOBAL DE DF_VENTAS Y CRUCE CON DISTRIBUCIÓN
+# =========================================================================
+if not df_ventas.empty and len(df_ventas.columns) > 40:
+  col_fvta = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA VENTA", "F_VTA", "FECHA_VENTA", "FECHA VTA"]), 4)
+  col_c_has_le = (len(df_ventas.columns) > 2 and (df_ventas.iloc[:, 2].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").any())
+  col_estado = (2 if col_c_has_le else next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]), 7))
+  col_dec = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["DECISION", "DECISIÓN", "AT", "DECISION FINAL", "ESTADO DECISION", "DECISION_FINAL"]), 45)
+  col_bx = 75 if len(df_ventas.columns) > 75 else -1
+
+  df_ventas["F_VTA"] = pd.to_datetime(df_ventas.iloc[:, col_fvta], errors="coerce").dt.date
+  df_ventas["ESTADO"] = df_ventas.iloc[:, col_estado].astype(str).str.strip().str.upper()
+  df_ventas["DECISION"] = df_ventas.iloc[:, col_dec].astype(str).str.strip().str.upper()
+
+  if col_bx != -1:
+    bx_str = df_ventas.iloc[:, col_bx].astype(str).str.strip()
+    df_ventas["BX_EMPTY"] = (df_ventas.iloc[:, col_bx].isna() | (bx_str == "") | (bx_str.str.upper() == "NAN") | (bx_str == "None"))
+  else:
+    dec_str = df_ventas.iloc[:, col_dec].astype(str).str.strip()
+    df_ventas["BX_EMPTY"] = (df_ventas.iloc[:, col_dec].isna() | (dec_str == "") | (dec_str == "-") | (dec_str.str.upper() == "NAN"))
+
+  col_fdec = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA DECISION", "FECHA DECISIÓN", "F_DEC", "FECHA_DECISION", "FECHA DEC"]), 49 if len(df_ventas.columns) > 49 else -1)
+
+  if col_fdec != -1 and len(df_ventas.columns) > col_fdec:
+    df_ventas["F_DEC"] = pd.to_datetime(df_ventas.iloc[:, col_fdec], errors="coerce").dt.date
+  else:
+    df_ventas["F_DEC"] = pd.NaT
+
+  df_ventas["F_DEC_EFF"] = df_ventas["F_DEC"].fillna(df_ventas["F_VTA"])
+
 if not df_distribucion.empty:
-  # Estandarizar nombre de columnas clave en distribucion
   col_id_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
   col_sup_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
   col_agt_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
 
   if col_id_dist:
     df_distribucion["id_per_clean"] = pd.to_numeric(df_distribucion[col_id_dist], errors="coerce")
+    if col_sup_dist: df_distribucion["Supervisor"] = df_distribucion[col_sup_dist]
+    if col_agt_dist: df_distribucion["agente"] = df_distribucion[col_agt_dist]
 
   if not df_ventas.empty:
     col_id_vta = next((c for c in df_ventas.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
@@ -274,37 +303,11 @@ opcion_hoja = st.sidebar.radio(
 )
 
 # =========================================================================
-# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA (CÓDIGO COMPLETO ORIGINAL)
+# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA
 # =========================================================================
 if opcion_hoja == "📊 Informe Gerencial por Día":
   if not df_ventas.empty and len(df_ventas.columns) > 40:
     st.sidebar.header("🔍 Filtros General")
-
-    col_fvta = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA VENTA", "F_VTA", "FECHA_VENTA", "FECHA VTA"]), 4)
-    col_c_has_le = (len(df_ventas.columns) > 2 and (df_ventas.iloc[:, 2].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").any())
-    col_estado = (2 if col_c_has_le else next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["ESTADO", "ESTADO LEAD", "ESTADO_LEAD", "STATUS"]), 7))
-    col_dec = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["DECISION", "DECISIÓN", "AT", "DECISION FINAL", "ESTADO DECISION", "DECISION_FINAL"]), 45)
-    col_bx = 75 if len(df_ventas.columns) > 75 else -1
-
-    df_ventas["F_VTA"] = pd.to_datetime(df_ventas.iloc[:, col_fvta], errors="coerce").dt.date
-    df_ventas["ESTADO"] = df_ventas.iloc[:, col_estado].astype(str).str.strip().str.upper()
-    df_ventas["DECISION"] = df_ventas.iloc[:, col_dec].astype(str).str.strip().str.upper()
-
-    if col_bx != -1:
-      bx_str = df_ventas.iloc[:, col_bx].astype(str).str.strip()
-      df_ventas["BX_EMPTY"] = (df_ventas.iloc[:, col_bx].isna() | (bx_str == "") | (bx_str.str.upper() == "NAN") | (bx_str == "None"))
-    else:
-      dec_str = df_ventas.iloc[:, col_dec].astype(str).str.strip()
-      df_ventas["BX_EMPTY"] = (df_ventas.iloc[:, col_dec].isna() | (dec_str == "") | (dec_str == "-") | (dec_str.str.upper() == "NAN"))
-
-    col_fdec = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA DECISION", "FECHA DECISIÓN", "F_DEC", "FECHA_DECISION", "FECHA DEC"]), 49 if len(df_ventas.columns) > 49 else -1)
-
-    if col_fdec != -1 and len(df_ventas.columns) > col_fdec:
-      df_ventas["F_DEC"] = pd.to_datetime(df_ventas.iloc[:, col_fdec], errors="coerce").dt.date
-    else:
-      df_ventas["F_DEC"] = pd.NaT
-
-    df_ventas["F_DEC_EFF"] = df_ventas["F_DEC"].fillna(df_ventas["F_VTA"])
 
     fechas_validas = pd.Series(df_ventas["F_VTA"]).dropna()
     años_disp = (sorted(pd.to_datetime(fechas_validas).dt.year.unique()) if not fechas_validas.empty else [date.today().year])
@@ -1598,7 +1601,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (NUEVO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
