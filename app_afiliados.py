@@ -1,5 +1,5 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import math
 import re
 import holidays
@@ -241,7 +241,7 @@ df_distribucion = cargar_distribucion()
 # Preprocesamiento de llamadas
 if not df_calls.empty:
   col_c_agt = next((c for c in df_calls.columns if str(c).strip().lower() in ["asesor", "agente", "c", "nombre"]), df_calls.columns[2] if len(df_calls.columns) > 2 else None)
-  col_c_val = next((c for c in df_calls.columns if str(c).strip().lower() in ["llamadas", "llamadas_efectivas", "e", "val", "calls"]), df_calls.columns[4] if len(df_calls.columns) > 4 else None)
+  col_c_val = next((c for c in df_calls.columns if str(c).strip().lower() in ["llamadas", "llamadas_efectivas", "e", "val", "calls", "duracion"]), df_calls.columns[4] if len(df_calls.columns) > 4 else None)
   col_c_f = next((c for c in df_calls.columns if str(c).strip().lower() in ["fecha", "f_llamada", "i", "fecha_llamada"]), df_calls.columns[8] if len(df_calls.columns) > 8 else None)
   col_c_sup = next((c for c in df_calls.columns if str(c).strip().lower() in ["supervisor", "h"]), df_calls.columns[7] if len(df_calls.columns) > 7 else None)
 
@@ -321,7 +321,7 @@ opcion_hoja = st.sidebar.radio(
 )
 
 # =========================================================================
-# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA
+# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA (SIN NINGÚN CAMBIO)
 # =========================================================================
 if opcion_hoja == "📊 Informe Gerencial por Día":
   if not df_ventas.empty and len(df_ventas.columns) > 40:
@@ -1619,7 +1619,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO COMPLETO)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1636,7 +1636,54 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
   st.title(f"👥 Análisis Operativo por Asesor y Supervisor - {mes_sel_nombre} {año_sel}")
 
-  # 1. Filtros Locales de Operación en la misma hoja
+  # -------------------------------------------------------------------------
+  # 0. FUNCIONES DE APOYO: META HÁBIL MÉXICO (MX) & COMISIONES POR PUNTOS
+  # -------------------------------------------------------------------------
+  def calcular_meta_le_mx(anio, mes, hasta_dia=None):
+    """Calcula LE según días hábiles MX: L-V=4.1, Sáb=2.05, Dom y Festivos MX=0."""
+    festivos_mx = holidays.Mexico(years=anio)
+    num_dias = calendar.monthrange(anio, mes)[1]
+    max_d = hasta_dia if hasta_dia else num_dias
+    
+    meta_acum = 0.0
+    for d in range(1, max_d + 1):
+      f = date(anio, mes, d)
+      if f in festivos_mx or f.weekday() == 6:  # Domingo
+        continue
+      elif f.weekday() == 5:  # Sábado (4.1 / 2)
+        meta_acum += 2.05
+      else:  # L-V
+        meta_acum += 4.10
+    return meta_acum
+
+  # Fecha de corte acumulada a ayer para meta esperada
+  hoy = date.today()
+  if año_sel == hoy.year and mes_sel == hoy.month:
+    dia_corte_ayer = max(1, hoy.day - 1)
+  else:
+    dia_corte_ayer = calendar.monthrange(año_sel, mes_sel)[1]
+
+  meta_le_ind_ayer = calcular_meta_le_mx(año_sel, mes_sel, dia_corte_ayer)
+  meta_le_ind_mes = calcular_meta_le_mx(año_sel, mes_sel)
+
+  # Tabla de comisiones por puntos COP
+  tabla_comisiones_cop = {
+      0: 0, 11: 103500, 12: 165600, 13: 186300, 14: 207000, 15: 269100,
+      16: 331200, 17: 393300, 18: 434700, 19: 455400, 20: 476100, 21: 496800,
+      22: 507150, 23: 538200, 24: 610650, 25: 714150, 26: 817650, 27: 921150,
+      28: 1024650, 29: 1128150, 30: 1231650, 31: 1335150, 32: 1438650, 33: 1542150,
+      34: 1645650, 35: 1749150, 36: 1852650, 37: 1956150, 38: 2059650, 39: 2163150
+  }
+
+  def obtener_comision_cop(puntos):
+    pts = int(np.floor(puntos))
+    if pts < 11: return 0
+    if pts >= 39: return tabla_comisiones_cop[39]
+    return tabla_comisiones_cop.get(pts, 0)
+
+  # -------------------------------------------------------------------------
+  # 1. FILTROS LOCALES DE OPERACIÓN
+  # -------------------------------------------------------------------------
   st.markdown("##### 🎛️ Filtros de Control Operativo (Local de la Hoja)")
   col_op_f1, col_op_f2 = st.columns(2)
 
@@ -1649,7 +1696,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   with col_op_f1:
     sup_sel = st.selectbox("Filtrar por Supervisor:", supervisores_disp, index=0, key="op_sup_filter")
 
-  # Filtrar lista de asesores basada en el supervisor seleccionado
   df_dist_sub = df_distribucion.copy()
   if sup_sel != "Todos" and not df_dist_sub.empty and "Supervisor" in df_dist_sub.columns:
     df_dist_sub = df_dist_sub[df_dist_sub["Supervisor"] == sup_sel]
@@ -1663,7 +1709,9 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   with col_op_f2:
     asesor_op_sel = st.selectbox("Filtrar por Asesor:", asesores_disp, index=0, key="op_agt_filter")
 
-  # 2. Filtrado de Datasets Operativos
+  # -------------------------------------------------------------------------
+  # 2. FILTRADO DE DATASETS OPERATIVOS & NORMALIZACIÓN PARA CRUCE DE CALLS
+  # -------------------------------------------------------------------------
   df_vta_op = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy()
 
   if sup_sel != "Todos" and "Supervisor" in df_vta_op.columns:
@@ -1673,8 +1721,14 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     if "agente" in df_vta_op.columns:
       df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
 
-  if not df_calls.empty and "F_CALL" in df_calls.columns:
-    df_calls_op = df_calls[(pd.to_datetime(df_calls["F_CALL"]).dt.year == año_sel) & (pd.to_datetime(df_calls["F_CALL"]).dt.month == mes_sel)].copy()
+  # Normalización de llamadas cruzadas (Resuelve el problema de salida en ceros)
+  if not df_calls.empty:
+    col_fcall = next((c for c in df_calls.columns if str(c).upper() in ["F_CALL", "FECHA", "DATE"]), None)
+    if col_fcall:
+      df_calls_op = df_calls[(pd.to_datetime(df_calls[col_fcall]).dt.year == año_sel) & (pd.to_datetime(df_calls[col_fcall]).dt.month == mes_sel)].copy()
+    else:
+      df_calls_op = df_calls.copy()
+      
     if sup_sel != "Todos" and "Supervisor" in df_calls_op.columns:
       df_calls_op = df_calls_op[df_calls_op["Supervisor"] == sup_sel]
     if asesor_op_sel != "Todos" and "agente" in df_calls_op.columns:
@@ -1682,31 +1736,26 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   else:
     df_calls_op = pd.DataFrame()
 
-  # 3. Cálculo de KPIs Operativos Generales
+  # Columna de valor de llamadas
+  col_llamadas_val = None
+  if not df_calls_op.empty:
+    col_llamadas_val = next((c for c in df_calls_op.columns if str(c).strip().lower() in ["llamadas_val", "calls", "llamadas", "duracion"]), df_calls_op.columns[0])
+
+  # Identificación de columna PUNTOS en Ventas (Columna BO)
+  col_bo_puntos = None
+  for c in df_ventas.columns:
+    if str(c).strip().upper() in ["BO", "PUNTOS", "PUNTO"]:
+      col_bo_puntos = c
+      break
+  if not col_bo_puntos and len(df_ventas.columns) > 66:
+    col_bo_puntos = df_ventas.columns[66]
+
+  # -------------------------------------------------------------------------
+  # 3. CÁLCULO DE KPIS OPERATIVOS Y RECUADROS SUPERIORES
+  # -------------------------------------------------------------------------
   le_op_total = (df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in df_vta_op.columns else 0
   tramites_op_total = len(df_vta_op)
-  llamadas_op_total = df_calls_op["Llamadas_Val"].sum() if (not df_calls_op.empty and "Llamadas_Val" in df_calls_op.columns) else 0
-
-  if "DECISION" in df_vta_op.columns and "F_DEC_EFF" in df_vta_op.columns:
-    ap_mes_op_total = df_vta_op[(pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(df_vta_op["F_DEC_EFF"]).dt.month == mes_sel) & (df_vta_op["DECISION"] == "A")].shape[0]
-  else:
-    ap_mes_op_total = 0
-
-  inicio_m_op = date(año_sel, mes_sel, 1)
-  if "DECISION" in df_ventas.columns and "F_DEC_EFF" in df_ventas.columns:
-    df_vta_cos_sub = df_ventas.copy()
-    if sup_sel != "Todos" and "Supervisor" in df_vta_cos_sub.columns:
-      df_vta_cos_sub = df_vta_cos_sub[df_vta_cos_sub["Supervisor"] == sup_sel]
-    if asesor_op_sel != "Todos" and "agente" in df_vta_cos_sub.columns:
-      df_vta_cos_sub = df_vta_cos_sub[df_vta_cos_sub["agente"] == asesor_op_sel]
-      
-    ap_cos_op_total = df_vta_cos_sub[(pd.to_datetime(df_vta_cos_sub["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(df_vta_cos_sub["F_DEC_EFF"]).dt.month == mes_sel) & (pd.to_datetime(df_vta_cos_sub["F_VTA"]) < pd.Timestamp(inicio_m_op)) & (df_vta_cos_sub["DECISION"] == "A")].shape[0]
-  else:
-    ap_cos_op_total = 0
-
-  ap_tot_op = ap_mes_op_total + ap_cos_op_total
-  pct_ap_mes_op = (ap_mes_op_total / le_op_total * 100.0) if le_op_total > 0 else 0.0
-  pct_ap_tot_op = (ap_tot_op / le_op_total * 100.0) if le_op_total > 0 else 0.0
+  llamadas_op_total = df_calls_op[col_llamadas_val].sum() if (not df_calls_op.empty and col_llamadas_val) else 0
 
   if not df_dist_sub.empty:
     col_estado_dist = next((c for c in df_dist_sub.columns if str(c).strip().lower() in ["estado", "status"]), None)
@@ -1715,32 +1764,86 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     else:
       agt_activos_count = len(df_dist_sub)
   else:
-    agt_activos_count = df_vta_op["agente"].nunique() if "agente" in df_vta_op.columns else 1
+    agt_activos_count = df_vta_op["agente"].nunique() if ("agente" in df_vta_op.columns and not df_vta_op.empty) else 1
 
-  col_okpi1, col_okpi2, col_okpi3, col_okpi4 = st.columns(4)
-  with col_okpi1:
-    cr_llamadas_gen = (tramites_op_total / llamadas_op_total * 100.0) if llamadas_op_total > 0 else 0.0
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Trámites & Llamadas</div><div class="kpi-value">{tramites_op_total:,}</div><div class="kpi-subtext">Llamadas Efectivas: <b>{int(llamadas_op_total):,}</b></div><div class="kpi-subtext">CR / Llamadas: <b>{cr_llamadas_gen:.1f}%</b></div></div>""", unsafe_allow_html=True)
+  agt_activos_count = max(1, agt_activos_count)
 
-  with col_okpi2:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP MES Operación</div><div class="kpi-value">{ap_mes_op_total:,}</div><div class="kpi-subtext">% AP Mes: <b>{pct_ap_mes_op:.2f}%</b></div><div class="kpi-subtext">LE Operación: <b>{le_op_total:,}</b></div></div>""", unsafe_allow_html=True)
+  # Metas globales del equipo a ayer
+  meta_le_equipo_ayer = meta_le_ind_ayer * agt_activos_count
+  desviacion_le_equipo = le_op_total - meta_le_equipo_ayer
+  pct_cumplimiento_le_equipo = (le_op_total / meta_le_equipo_ayer * 100.0) if meta_le_equipo_ayer > 0 else 0.0
 
-  with col_okpi3:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">AP Totales (Mes + Cosecha)</div><div class="kpi-value">{ap_tot_op:,}</div><div class="kpi-subtext">AP Cosecha: <b>{ap_cos_op_total:,}</b></div><div class="kpi-subtext">% AP Total: <b>{pct_ap_tot_op:.2f}%</b></div></div>""", unsafe_allow_html=True)
+  # Medias por asesor
+  media_tramites_asesor = tramites_op_total / agt_activos_count
+  media_llamadas_asesor = llamadas_op_total / agt_activos_count
+  media_leads_real_asesor = le_op_total / agt_activos_count
+  media_leads_esperada_asesor = meta_le_ind_ayer
+  pct_cump_media_leads = (media_leads_real_asesor / media_leads_esperada_asesor * 100.0) if media_leads_esperada_asesor > 0 else 0.0
 
-  with col_okpi4:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-title">Equipo Operativo</div><div class="kpi-value">{agt_activos_count}</div><div class="kpi-subtext">Supervisor Filtro: <b>{sup_sel}</b></div></div>""", unsafe_allow_html=True)
+  # RECUADROS KPI SUPERIORES (FILA 1)
+  col_kpi_a1, col_kpi_a2, col_kpi_a3, col_kpi_a4 = st.columns(4)
+  with col_kpi_a1:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">LEADS EFECTIVOS (A AYER - DH {dia_corte_ayer})</div>
+        <div class="kpi-value">{le_op_total:,}</div>
+        <div class="kpi-subtext">Meta Equipo: <b>{meta_le_equipo_ayer:,.1f}</b></div>
+        <div class="kpi-subtext">Desviación: <b style="color:{'#15803d' if desviacion_le_equipo >= 0 else '#b91c1c'};">{desviacion_le_equipo:+,.1f} ({pct_cumplimiento_le_equipo:.1f}%)</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_a2:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">MEDIA TRÁMITES / LLAMADAS POR ASESOR</div>
+        <div class="kpi-value">{media_tramites_asesor:,.1f}</div>
+        <div class="kpi-subtext">Media Llamadas/Asesor: <b>{media_llamadas_asesor:,.1f}</b></div>
+        <div class="kpi-subtext">Llamadas Totales: <b>{int(llamadas_op_total):,}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_a3:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">MEDIA LEADS POR ASESOR</div>
+        <div class="kpi-value">{media_leads_real_asesor:,.1f}</div>
+        <div class="kpi-subtext">Media Esperada a Ayer: <b>{media_leads_esperada_asesor:,.1f}</b></div>
+        <div class="kpi-subtext">Meta Mes Completo: <b>{meta_le_ind_mes:,.1f}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+  with col_kpi_a4:
+    st.markdown(f"""
+    <div class="kpi-card">
+        <div class="kpi-title">% CUMP. MEDIA LEADS</div>
+        <div class="kpi-value">{pct_cump_media_leads:.1f}%</div>
+        <div class="kpi-subtext">Asesores Activos: <b>{agt_activos_count}</b></div>
+        <div class="kpi-subtext">Filtro Supervisor: <b>{sup_sel}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
 
   st.divider()
   st.subheader("📋 Matriz Comparativa Operativa por Asesor")
 
-  # 4. Agrupación por Asesor con Métricas de Llamadas, Maduración y No Evaluados
+  # -------------------------------------------------------------------------
+  # 4. AGRUPACIÓN POR ASESOR CON META LE, LE, PUNTOS Y COMISIÓN COP
+  # -------------------------------------------------------------------------
   def agrupar_por_asesor_completo(df_sub, df_vta_full, df_calls_sub):
     records = []
     col_agente = "agente" if "agente" in df_sub.columns else ("asesor" if "asesor" in df_sub.columns else df_sub.columns[0])
     inicio_m_func = date(año_sel, mes_sel, 1)
 
+    # Pre-agrupamiento de llamadas normalizando nombres (Resuelve salida en cero)
+    llamadas_dict = {}
+    if not df_calls_sub.empty:
+      col_agt_c = next((c for c in df_calls_sub.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), df_calls_sub.columns[0])
+      col_val_c = next((c for c in df_calls_sub.columns if str(c).strip().lower() in ["llamadas_val", "calls", "llamadas", "duracion"]), df_calls_sub.columns[-1])
+      for _, r_call in df_calls_sub.iterrows():
+        k_agt = str(r_call[col_agt_c]).strip().upper()
+        llamadas_dict[k_agt] = llamadas_dict.get(k_agt, 0.0) + (float(r_call[col_val_c]) if pd.notna(r_call[col_val_c]) else 0.0)
+
     for agt, grp in df_sub.groupby(col_agente):
+      agt_key = str(agt).strip().upper()
       sup_agt = grp["Supervisor"].iloc[0] if "Supervisor" in grp.columns and pd.notna(grp["Supervisor"].iloc[0]) else "Sin Supervisor"
       
       is_le = grp["ESTADO"] == "LEAD EFECTIVO" if "ESTADO" in grp.columns else pd.Series(True, index=grp.index)
@@ -1756,6 +1859,10 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       no_cond = (grp["ESTADO"] == "LEAD NO CONDICIONES").sum() if "ESTADO" in grp.columns else 0
       otros = (~grp["ESTADO"].isin(["LEAD EFECTIVO", "LEAD NO CAPTURADO", "LEAD NO CONDICIONES", "", "NAN"])).sum() if "ESTADO" in grp.columns else 0
 
+      # Meta LE y % Cumplimiento LE por Asesor
+      meta_le_ind = meta_le_ind_mes
+      pct_cump_le = (le_v / meta_le_ind) if meta_le_ind > 0 else 0.0
+
       # AP MES
       if "F_DEC_EFF" in grp.columns and "DECISION" in grp.columns:
         ap_m = (is_le & (pd.to_datetime(grp["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"]).dt.month == mes_sel) & (dec == "A")).sum()
@@ -1765,7 +1872,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       # AP COSECHA
       if not df_vta_full.empty and "agente" in df_vta_full.columns and "F_DEC_EFF" in df_vta_full.columns:
         df_cos_agt = df_vta_full[
-            (df_vta_full["agente"] == agt) &
+            (df_vta_full["agente"].astype(str).str.strip().str.upper() == agt_key) &
             (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.year == año_sel) &
             (pd.to_datetime(df_vta_full["F_DEC_EFF"]).dt.month == mes_sel) &
             (pd.to_datetime(df_vta_full["F_VTA"]) < pd.Timestamp(inicio_m_func)) &
@@ -1783,12 +1890,8 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       canc_v = (is_le & (dec == "C")).sum()
       pend_v = (is_le & (dec == "P")).sum()
 
-      # Llamadas Efectivas
-      if not df_calls_sub.empty and "agente" in df_calls_sub.columns:
-        llam_ef = df_calls_sub[df_calls_sub["agente"] == agt]["Llamadas_Val"].sum()
-      else:
-        llam_ef = 0
-
+      # Llamadas Efectivas cruzadas
+      llam_ef = llamadas_dict.get(agt_key, 0.0)
       cr_llam = (tram / llam_ef) if llam_ef > 0 else 0.0
 
       pct_le = (le_v / tram) if tram > 0 else 0.0
@@ -1803,15 +1906,26 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
       pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
 
+      # Extracción de Puntos (Columna BO / Puntos)
+      if col_bo_puntos and col_bo_puntos in grp.columns:
+        pts_val = pd.to_numeric(grp[col_bo_puntos], errors='coerce').sum()
+      else:
+        pts_val = float(ap_tot)  # Fallback a AP Totales si no existe la columna
+
+      pct_cump_puntos = (pts_val / 11.0) if pts_val > 0 else 0.0
+      comision_cop_val = obtener_comision_cop(pts_val)
+
       records.append({
           "Asesor": agt,
           "Supervisor": sup_agt,
           "Llamadas Efectivas": llam_ef,
           "Trámites": tram,
+          "Meta LE": meta_le_ind,
+          "LE": le_v,
+          "% Cump LE": pct_cump_le,
           "CR / Llamadas": cr_llam,
           "Desbordamiento / Llamadas": 0,
           "% Desbordamiento": 0.0,
-          "LE": le_v,
           "No Cap": no_cap,
           "No Cond": no_cond,
           "Otros": otros,
@@ -1831,7 +1945,10 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           "Canc": canc_v,
           "% Canc": pct_canc,
           "Pend": pend_v,
-          "% Pend": pct_pend
+          "% Pend": pct_pend,
+          "Puntos": pts_val,
+          "% Cump Puntos": pct_cump_puntos,
+          "Comisión COP": comision_cop_val
       })
     return pd.DataFrame(records)
 
@@ -1851,6 +1968,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       tot_agt["Asesor"] = "TOTAL GENERAL"
       tot_agt["Supervisor"] = "-"
       tot_agt["CR / Llamadas"] = (tot_agt["Trámites"] / tot_agt["Llamadas Efectivas"]) if tot_agt.get("Llamadas Efectivas", 0) > 0 else 0.0
+      tot_agt["% Cump LE"] = (tot_agt["LE"] / tot_agt["Meta LE"]) if tot_agt.get("Meta LE", 0) > 0 else 0.0
       tot_agt["Desbordamiento / Llamadas"] = 0
       tot_agt["% Desbordamiento"] = 0.0
       tot_agt["% LE"] = (tot_agt["LE"] / tot_agt["Trámites"]) if tot_agt.get("Trámites", 0) > 0 else 0.0
@@ -1862,26 +1980,28 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       tot_agt["% Decl"] = (tot_agt["Decl"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
       tot_agt["% Canc"] = (tot_agt["Canc"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
       tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
+      tot_agt["% Cump Puntos"] = (tot_agt["Puntos"] / (11.0 * len(df_matriz_agt))) if len(df_matriz_agt) > 0 else 0.0
 
       cols_orden = [
-          "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "CR / Llamadas",
-          "Desbordamiento / Llamadas", "% Desbordamiento", "LE", "No Cap", "No Cond",
+          "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "Meta LE", "LE", "% Cump LE",
+          "CR / Llamadas", "Desbordamiento / Llamadas", "% Desbordamiento", "No Cap", "No Cond",
           "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes",
           "% AP Total", "Eval", "% Eval", "No Evaluado", "% No Evaluado", "Decl", "% Decl",
-          "Canc", "% Canc", "Pend", "% Pend"
+          "Canc", "% Canc", "Pend", "% Pend", "Puntos", "% Cump Puntos", "Comisión COP"
       ]
 
       df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)[cols_orden]
 
       format_agt_dict = {
-          "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "CR / Llamadas": "{:.1%}",
-          "Desbordamiento / Llamadas": "{:+,.0f}", "% Desbordamiento": "{:+.1%}",
-          "LE": "{:,.0f}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
+          "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "Meta LE": "{:,.1f}", "LE": "{:,.0f}",
+          "% Cump LE": "{:.1%}", "CR / Llamadas": "{:.1%}", "Desbordamiento / Llamadas": "{:+,.0f}",
+          "% Desbordamiento": "{:+.1%}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
           "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "AP Cosecha": "{:,.0f}",
           "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
           "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}", "% No Evaluado": "{:.1%}",
           "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}", "% Canc": "{:.1%}",
-          "Pend": "{:,.0f}", "% Pend": "{:.1%}"
+          "Pend": "{:,.0f}", "% Pend": "{:.1%}", "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}",
+          "Comisión COP": "${:,.0f}"
       }
 
       def resaltar_desbordamiento(val):
