@@ -1583,7 +1583,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CON FORMATO CONDICIONAL COMPLETO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CON FORMATO CONDICIONAL & HISTÓRICO MULTIMES)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -2145,7 +2145,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
     df_matriz_completa = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)
 
-    # DEFINICIÓN DE COLUMNAS PARA CADA TABLA
     cols_tabla_productividad = [
         "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "Meta LE", "LE", "% Cump LE",
         "CR / Llamadas", "Desbordamiento / Llamadas", "% Desbordamiento", "No Cap", "No Cond",
@@ -2161,7 +2160,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     df_productividad = df_matriz_completa[cols_tabla_productividad].copy()
     df_conversion = df_matriz_completa[cols_tabla_conversion].copy()
 
-    # DICCIONARIOS DE FORMATO ESPECÍFICOS
     format_prod_dict = {
         "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "Meta LE": "{:,.1f}", "LE": "{:,.0f}",
         "% Cump LE": "{:.1%}", "CR / Llamadas": "{:.1%}", "Desbordamiento / Llamadas": "{:+,.0f}",
@@ -2183,7 +2181,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     rgb_red = (248, 140, 140)
     rgb_white = (255, 255, 255)
 
-    # FORMATO CONDICIONAL PARA TABLA 1 (PRODUCTIVIDAD OPERATIVA POR ASESOR)
     def aplicar_condicionales_t1(df_input):
       styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
       df_no_tot = df_input[df_input["Asesor"] != "TOTAL GENERAL"]
@@ -2214,7 +2211,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           val = row[col]
           
           if isinstance(val, (int, float, np.number)) and not pd.isna(val):
-            # 1. Llamadas Efectivas (media ± 10% en verde, alejándose en rojo)
             if col == "Llamadas Efectivas":
               lb, ub = 0.9 * media_llamadas, 1.1 * media_llamadas
               if lb <= val <= ub:
@@ -2228,20 +2224,17 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
                 bg = f"background-color: rgb({r}, {g}, {b}); color: #7f1d1d; font-weight: bold;"
               cell_style += " " + bg
                     
-            # 2. % Cump LE, CR / Llamadas, % LE -> Verde a Rojo con Naranja Intermedio
             elif col in ["% Cump LE", "CR / Llamadas", "% LE"]:
               vmin, vmax = min_max[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
 
-            # 3. Desbordamiento de llamadas
             elif col in ["Desbordamiento / Llamadas", "% Desbordamiento"]:
               if val > 0: bg = "background-color: #dcfce7; color: #15803d; font-weight: bold;"
               elif val < 0: bg = "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
               else: bg = ""
               if bg: cell_style += " " + bg
                     
-            # 4. Total AP -> Rangos (0-1: Rojo, 2-3: Naranja, 4: Verde claro, >=5: Verde)
             elif col == "Total AP":
               if val <= 1:
                 bg = "background-color: #fee2e2; color: #991b1b; font-weight: bold;"
@@ -2253,7 +2246,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
                 bg = "background-color: #a7f3d0; color: #047857; font-weight: bold;"
               cell_style += " " + bg
 
-            # 5. % AP Mes & % AP Total -> Verde a Blanco
             elif col in ["% AP Mes", "% AP Total"]:
               vmin, vmax = min_max[col]
               bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
@@ -2263,7 +2255,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
       return styles
 
-    # FORMATO CONDICIONAL PARA TABLA 2 (CONVERSIÓN Y EFECTIVIDAD POR ASESOR)
     def aplicar_condicionales_t2(df_input):
       styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
       df_no_tot = df_input[df_input["Asesor"] != "TOTAL GENERAL"]
@@ -2287,13 +2278,11 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           val = row[col]
           
           if isinstance(val, (int, float, np.number)) and not pd.isna(val):
-            # 1. % Eval -> Verde (máx) a Rojo (mín) con Naranja Intermedio
             if col == "% Eval":
               vmin, vmax = min_max[col]
               bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
               if bg: cell_style += " " + bg
                     
-            # 2. % No Evaluado -> > 75% degradado desde rojo tenue a rojo intenso
             elif col == "% No Evaluado":
               if val > 0.75:
                 norm = min(1.0, (val - 0.75) / 0.25)
@@ -2303,7 +2292,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
                 bg = f"background-color: rgb({r}, {g}, {b}); color: #7f1d1d; font-weight: bold;"
                 cell_style += " " + bg
                         
-            # 3. Total AP -> Rangos
             elif col == "Total AP":
               if val <= 1:
                 bg = "background-color: #fee2e2; color: #991b1b; font-weight: bold;"
@@ -2315,13 +2303,11 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
                 bg = "background-color: #a7f3d0; color: #047857; font-weight: bold;"
               cell_style += " " + bg
 
-            # 4. % AP Mes & % AP Total -> Verde a Blanco
             elif col in ["% AP Mes", "% AP Total"]:
               vmin, vmax = min_max[col]
               bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
               if bg: cell_style += " " + bg
 
-            # 5. Comisión COP -> > $0 verde claro a verde intenso
             elif col == "Comisión COP":
               if val > 0:
                 vmin, vmax = min_max[col]
@@ -2357,6 +2343,221 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
         .apply(aplicar_condicionales_t2, axis=None)
     )
     st.dataframe(styler_conv, use_container_width=True, height=520, hide_index=True)
+
+    # -------------------------------------------------------------------------
+    # 6. HISTÓRICO CONSOLIDADO MULTIMES POR ASESOR
+    # -------------------------------------------------------------------------
+    st.divider()
+    st.subheader("📜 Histórico Consolidado por Asesor (Evolución Mes a Mes)")
+    st.caption("Consulta la evolución mensual histórica de indicadores para un asesor específico a lo largo de todos los meses registrados.")
+
+    todos_asesores_hist = sorted(df_ventas["agente"].dropna().astype(str).str.strip().unique().tolist()) if ("agente" in df_ventas.columns and not df_ventas.empty) else []
+    
+    if todos_asesores_hist:
+      idx_default = 0
+      if asesor_op_sel != "Todos" and asesor_op_sel in todos_asesores_hist:
+        idx_default = todos_asesores_hist.index(asesor_op_sel)
+      
+      asesor_hist_sel = st.selectbox(
+          "Seleccione Asesor para ver su Evolución Histórica:",
+          options=todos_asesores_hist,
+          index=idx_default,
+          key="op_asesor_historico_select"
+      )
+
+      def agrupar_historico_asesor(asesor_nom, df_vta, df_calls_full):
+        if df_vta.empty or not asesor_nom:
+          return pd.DataFrame(), pd.DataFrame()
+        
+        sub_vta = df_vta[df_vta["agente"].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()].copy()
+        if sub_vta.empty:
+          return pd.DataFrame(), pd.DataFrame()
+          
+        sub_vta["Año"] = pd.to_datetime(sub_vta["F_VTA"]).dt.year
+        sub_vta["Mes_Num"] = pd.to_datetime(sub_vta["F_VTA"]).dt.month
+        
+        periodos = sub_vta[["Año", "Mes_Num"]].drop_duplicates().sort_values(by=["Año", "Mes_Num"])
+        
+        recs_prod = []
+        recs_conv = []
+        
+        for _, p in periodos.iterrows():
+          y, m = int(p["Año"]), int(p["Mes_Num"])
+          mes_nom = f"{nombres_meses.get(m, str(m))} {y}"
+          
+          vta_m = sub_vta[(sub_vta["Año"] == y) & (sub_vta["Mes_Num"] == m)]
+          sup_agt = vta_m["Supervisor"].iloc[0] if ("Supervisor" in vta_m.columns and pd.notna(vta_m["Supervisor"].iloc[0])) else "-"
+          
+          calls_m = 0.0
+          if not df_calls_full.empty:
+            col_agt_c = "agente" if "agente" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["asesor", "agente", "nombre"]), df_calls_full.columns[0])
+            col_f_c = "F_CALL" if "F_CALL" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["fecha", "f_call", "date"]), None)
+            col_val_c = "Calls_Val" if "Calls_Val" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["calls", "llamadas_val", "llamadas"]), df_calls_full.columns[-1])
+            
+            if col_f_c:
+              sub_c = df_calls_full[
+                  (df_calls_full[col_agt_c].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()) &
+                  (pd.to_datetime(df_calls_full[col_f_c]).dt.year == y) &
+                  (pd.to_datetime(df_calls_full[col_f_c]).dt.month == m)
+              ]
+              calls_m = float(pd.to_numeric(sub_c[col_val_c], errors="coerce").sum()) if not sub_c.empty else 0.0
+
+          is_le = vta_m["ESTADO"] == "LEAD EFECTIVO" if "ESTADO" in vta_m.columns else pd.Series(True, index=vta_m.index)
+          dec = vta_m["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in vta_m.columns else pd.Series("", index=vta_m.index)
+          bx_empty_series = vta_m["BX_EMPTY"] if "BX_EMPTY" in vta_m.columns else pd.Series(False, index=vta_m.index)
+
+          is_eval = is_le & dec.isin(["A", "D", "P", "C"])
+          is_no_eval = is_le & (dec.isin(["-", "NONE", "NAN", ""]) | bx_empty_series)
+
+          tram = float(len(vta_m))
+          le_v = float(is_le.sum())
+          no_cap = float((vta_m["ESTADO"] == "LEAD NO CAPTURADO").sum()) if "ESTADO" in vta_m.columns else 0.0
+          no_cond = float((vta_m["ESTADO"] == "LEAD NO CONDICIONES").sum()) if "ESTADO" in vta_m.columns else 0.0
+          otros = float((~vta_m["ESTADO"].isin(["LEAD EFECTIVO", "LEAD NO CAPTURADO", "LEAD NO CONDICIONES", "", "NAN"])).sum()) if "ESTADO" in vta_m.columns else 0.0
+
+          meta_le_ind = calcular_meta_le_mx(y, m)
+          pct_cump_le = (le_v / meta_le_ind) if meta_le_ind > 0 else 0.0
+
+          inicio_m_func = date(y, m, 1)
+          ap_m_mask = is_le & (pd.to_datetime(vta_m["F_DEC_EFF"]).dt.year == y) & (pd.to_datetime(vta_m["F_DEC_EFF"]).dt.month == m) & (dec == "A")
+          ap_m = float(ap_m_mask.sum())
+
+          df_cos_agt = df_ventas[
+              (df_ventas["agente"].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()) &
+              (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == y) &
+              (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == m) &
+              (pd.to_datetime(df_ventas["F_VTA"]) < pd.Timestamp(inicio_m_func)) &
+              (df_ventas["DECISION"].astype(str).str.strip().str.upper() == "A")
+          ]
+          ap_cos = float(len(df_cos_agt))
+          ap_tot = ap_m + ap_cos
+
+          if col_puntos_vta and col_puntos_vta in vta_m.columns:
+            pts_mes = pd.to_numeric(vta_m.loc[ap_m_mask, col_puntos_vta], errors="coerce").fillna(1.0).sum()
+            pts_cos = (pd.to_numeric(df_cos_agt[col_puntos_vta], errors="coerce").fillna(1.0).sum() if not df_cos_agt.empty and col_puntos_vta in df_cos_agt.columns else 0.0)
+            pts_val = float(pts_mes + pts_cos)
+          else:
+            pts_val = float(ap_tot)
+
+          eval_v = float(is_eval.sum())
+          no_eval_v = float(is_no_eval.sum())
+          decl_v = float((is_le & (dec == "D")).sum())
+          canc_v = float((is_le & (dec == "C")).sum())
+          pend_v = float((is_le & (dec == "P")).sum())
+
+          cr_llam = (tram / calls_m) if calls_m > 0 else 0.0
+          pct_le = (le_v / tram) if tram > 0 else 0.0
+          pct_rem = (otros / tram) if tram > 0 else 0.0
+
+          pct_ap_m = (ap_m / le_v) if le_v > 0 else 0.0
+          pct_ap_tot = (ap_tot / le_v) if le_v > 0 else 0.0
+
+          pct_eval = (eval_v / le_v) if le_v > 0 else 0.0
+          pct_no_eval = (no_eval_v / le_v) if le_v > 0 else 0.0
+          pct_decl = (decl_v / le_v) if le_v > 0 else 0.0
+          pct_canc = (canc_v / le_v) if le_v > 0 else 0.0
+          pct_pend = (pend_v / le_v) if le_v > 0 else 0.0
+
+          pct_cump_puntos = (pts_val / 11.0) if pts_val > 0 else 0.0
+          comision_cop_val = float(obtener_comision_cop(pts_val))
+
+          recs_prod.append({
+              "Asesor": mes_nom,
+              "Supervisor": sup_agt,
+              "Llamadas Efectivas": calls_m,
+              "Trámites": tram,
+              "Meta LE": meta_le_ind,
+              "LE": le_v,
+              "% Cump LE": pct_cump_le,
+              "CR / Llamadas": cr_llam,
+              "Desbordamiento / Llamadas": 0.0,
+              "% Desbordamiento": 0.0,
+              "No Cap": no_cap,
+              "No Cond": no_cond,
+              "Otros": otros,
+              "% LE": pct_le,
+              "% REM/RECH": pct_rem,
+              "AP Mes": ap_m,
+              "AP Cosecha": ap_cos,
+              "Total AP": ap_tot,
+              "% AP Mes": pct_ap_m,
+              "% AP Total": pct_ap_tot
+          })
+
+          recs_conv.append({
+              "Asesor": mes_nom,
+              "Supervisor": sup_agt,
+              "LE": le_v,
+              "Eval": eval_v,
+              "% Eval": pct_eval,
+              "No Evaluado": no_eval_v,
+              "% No Evaluado": pct_no_eval,
+              "Decl": decl_v,
+              "% Decl": pct_decl,
+              "Canc": canc_v,
+              "% Canc": pct_canc,
+              "Pend": pend_v,
+              "% Pend": pct_pend,
+              "AP Mes": ap_m,
+              "AP Cosecha": ap_cos,
+              "Total AP": ap_tot,
+              "% AP Mes": pct_ap_m,
+              "% AP Total": pct_ap_tot,
+              "Puntos": pts_val,
+              "% Cump Puntos": pct_cump_puntos,
+              "Comisión COP": comision_cop_val
+          })
+
+        return pd.DataFrame(recs_prod), pd.DataFrame(recs_conv)
+
+      df_hist_prod, df_hist_conv = agrupar_historico_asesor(asesor_hist_sel, df_ventas, df_calls)
+
+      if not df_hist_prod.empty:
+        tot_h_p = df_hist_prod.sum(numeric_only=True).to_dict()
+        tot_h_p["Asesor"] = "TOTAL GENERAL"
+        tot_h_p["Supervisor"] = "-"
+        tot_h_p["CR / Llamadas"] = (tot_h_p["Trámites"] / tot_h_p["Llamadas Efectivas"]) if tot_h_p.get("Llamadas Efectivas", 0) > 0 else 0.0
+        tot_h_p["% Cump LE"] = (tot_h_p["LE"] / tot_h_p["Meta LE"]) if tot_h_p.get("Meta LE", 0) > 0 else 0.0
+        tot_h_p["Desbordamiento / Llamadas"] = 0.0
+        tot_h_p["% Desbordamiento"] = 0.0
+        tot_h_p["% LE"] = (tot_h_p["LE"] / tot_h_p["Trámites"]) if tot_h_p.get("Trámites", 0) > 0 else 0.0
+        tot_h_p["% REM/RECH"] = (tot_h_p["Otros"] / tot_h_p["Trámites"]) if tot_h_p.get("Trámites", 0) > 0 else 0.0
+        tot_h_p["% AP Mes"] = (tot_h_p["AP Mes"] / tot_h_p["LE"]) if tot_h_p.get("LE", 0) > 0 else 0.0
+        tot_h_p["% AP Total"] = (tot_h_p["Total AP"] / tot_h_p["LE"]) if tot_h_p.get("LE", 0) > 0 else 0.0
+        
+        df_hist_prod_tot = pd.concat([df_hist_prod, pd.DataFrame([tot_h_p])], ignore_index=True)
+
+        tot_h_c = df_hist_conv.sum(numeric_only=True).to_dict()
+        tot_h_c["Asesor"] = "TOTAL GENERAL"
+        tot_h_c["Supervisor"] = "-"
+        tot_h_c["% Eval"] = (tot_h_c["Eval"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% No Evaluado"] = (tot_h_c["No Evaluado"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% Decl"] = (tot_h_c["Decl"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% Canc"] = (tot_h_c["Canc"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% Pend"] = (tot_h_c["Pend"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% AP Mes"] = (tot_h_c["AP Mes"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% AP Total"] = (tot_h_c["Total AP"] / tot_h_c["LE"]) if tot_h_c.get("LE", 0) > 0 else 0.0
+        tot_h_c["% Cump Puntos"] = (tot_h_c["Puntos"] / (11.0 * len(df_hist_conv))) if len(df_hist_conv) > 0 else 0.0
+
+        df_hist_conv_tot = pd.concat([df_hist_conv, pd.DataFrame([tot_h_c])], ignore_index=True)
+
+        st.markdown(f"##### 📊 Histórico de Productividad Operativa — **{asesor_hist_sel}**")
+        styler_hist_p = (
+            df_hist_prod_tot.style.format(format_prod_dict)
+            .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+            .apply(aplicar_condicionales_t1, axis=None)
+        )
+        st.dataframe(styler_hist_p, use_container_width=True, hide_index=True)
+
+        st.markdown(f"##### 🎯 Histórico de Conversión y Efectividad — **{asesor_hist_sel}**")
+        styler_hist_c = (
+            df_hist_conv_tot.style.format(format_conv_dict)
+            .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+            .apply(aplicar_condicionales_t2, axis=None)
+        )
+        st.dataframe(styler_hist_c, use_container_width=True, hide_index=True)
+      else:
+        st.warning(f"⚠️ No se registraron datos históricos para el asesor **{asesor_hist_sel}**.")
 
   else:
     st.info("ℹ️ No se encontraron registros de ventas para el filtro operativo seleccionado.")
