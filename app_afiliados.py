@@ -165,7 +165,7 @@ def interpolate_color_3pt(val, vmin, vmax, rgb_low, rgb_mid, rgb_high):
     b = int(rgb_high[2] + t * (rgb_high[2] - rgb_mid[2]))
   return f"background-color: rgb({r}, {g}, {b}); color: #0f172a;"
 
-# 1. Termómetro Tipo Pila Segmentada
+# Termómetros visuales
 def render_pila_bar(pct):
   c1 = "#ef4444" if pct > 0 else "#e2e8f0"
   c2 = "#f59e0b" if pct >= 0.25 else "#e2e8f0"
@@ -178,7 +178,6 @@ def render_pila_bar(pct):
         <div style="flex:1; background:{c4}; border-radius:0 3px 3px 0;"></div>
     </div>"""
 
-# 2. Termómetro Tipo Gauge Semicírculo Compacto
 def render_gauge_svg(pct):
   p = min(max(pct, 0.0), 1.0)
   rad = p * math.pi
@@ -239,8 +238,12 @@ df_ventas, df_planta, df_ppto, df_malla, df_calls = cargar_pestanas()
 df_distribucion = cargar_distribucion()
 
 # =========================================================================
-# ⚙️ PREPROCESAMIENTO GLOBAL DE DF_VENTAS Y CRUCE DE LLAMADAS POR ID_USER
+# ⚙️ PREPROCESAMIENTO GLOBAL DE DF_VENTAS Y LLAMADAS
 # =========================================================================
+col_id_dist = None
+col_sup_dist = None
+col_agt_dist = None
+
 if not df_distribucion.empty:
   col_id_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
   col_sup_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
@@ -251,7 +254,6 @@ if not df_distribucion.empty:
     if col_sup_dist: df_distribucion["Supervisor"] = df_distribucion[col_sup_dist]
     if col_agt_dist: df_distribucion["agente"] = df_distribucion[col_agt_dist]
 
-# Preprocesamiento seguro de Llamadas utilizando Columna C (id_user) y Columna E (Calls)
 if not df_calls.empty:
   col_c_id = next((c for c in df_calls.columns if str(c).strip().lower() in ["id_user", "id_per", "id", "c"]), df_calls.columns[2] if len(df_calls.columns) > 2 else None)
   col_c_val = next((c for c in df_calls.columns if str(c).strip().lower() in ["calls", "llamadas_totales", "llamadas", "val", "e"]), df_calls.columns[4] if len(df_calls.columns) > 4 else None)
@@ -260,18 +262,6 @@ if not df_calls.empty:
   df_calls["id_per_clean"] = pd.to_numeric(df_calls[col_c_id], errors="coerce") if col_c_id else np.nan
   df_calls["F_CALL"] = pd.to_datetime(df_calls[col_c_f], errors="coerce").dt.date if col_c_f else pd.NaT
   df_calls["Calls_Val"] = pd.to_numeric(df_calls[col_c_val], errors="coerce").fillna(0) if col_c_val else 0
-
-  if not df_distribucion.empty and "id_per_clean" in df_distribucion.columns:
-    dist_sub_calls = df_distribucion.drop_duplicates(subset=["id_per_clean"]).copy()
-    cols_map = ["id_per_clean"]
-    if "Supervisor" in dist_sub_calls.columns: cols_map.append("Supervisor")
-    if "agente" in dist_sub_calls.columns: cols_map.append("agente")
-    
-    df_calls = pd.merge(df_calls, dist_sub_calls[cols_map], on="id_per_clean", how="left", suffixes=("", "_dist"))
-    if "Supervisor_dist" in df_calls.columns:
-      df_calls["Supervisor"] = df_calls["Supervisor"].fillna(df_calls["Supervisor_dist"])
-    if "agente_dist" in df_calls.columns:
-      df_calls["agente"] = df_calls["agente"].fillna(df_calls["agente_dist"])
 
 if not df_ventas.empty and len(df_ventas.columns) > 40:
   col_fvta = next((i for i, c in enumerate(df_ventas.columns) if str(c).strip().upper() in ["FECHA VENTA", "F_VTA", "FECHA_VENTA", "FECHA VTA"]), 4)
@@ -300,24 +290,9 @@ if not df_ventas.empty and len(df_ventas.columns) > 40:
 
   df_ventas["F_DEC_EFF"] = df_ventas["F_DEC"].fillna(df_ventas["F_VTA"])
 
-if not df_distribucion.empty and not df_ventas.empty:
   col_id_vta = next((c for c in df_ventas.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
-  if col_id_vta and col_id_dist:
+  if col_id_vta:
     df_ventas["id_per_clean"] = pd.to_numeric(df_ventas[col_id_vta], errors="coerce")
-    dist_sub = df_distribucion.drop_duplicates(subset=["id_per_clean"]).copy()
-    
-    rename_merge = {}
-    if col_sup_dist: rename_merge[col_sup_dist] = "Supervisor_Dist"
-    if col_agt_dist: rename_merge[col_agt_dist] = "agente_Dist"
-    dist_sub = dist_sub.rename(columns=rename_merge)
-
-    cols_to_use = ["id_per_clean"] + [c for c in ["Supervisor_Dist", "agente_Dist"] if c in dist_sub.columns]
-    df_ventas = pd.merge(df_ventas, dist_sub[cols_to_use], on="id_per_clean", how="left")
-
-    if "Supervisor_Dist" in df_ventas.columns:
-      df_ventas["Supervisor"] = df_ventas["Supervisor_Dist"].fillna("Sin Supervisor")
-    if "agente_Dist" in df_ventas.columns:
-      df_ventas["agente"] = df_ventas["agente_Dist"].fillna(df_ventas.get("asesor", "Sin Asesor"))
 
 # NAVEGACIÓN PRINCIPAL EN EL SIDEBAR
 st.sidebar.image(
@@ -764,9 +739,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
 
     st.dataframe(styler, use_container_width=True, height=750, hide_index=True)
 
-    # =========================================================================
-    # 🚀 SECCIÓN: ANÁLISIS GERENCIAL DE CAPACIDAD Y DESVIACIÓN DE LEADS
-    # =========================================================================
+    # ANÁLISIS DE CAPACIDAD Y DESVIACIÓN
     st.divider()
     st.subheader("🎯 Análisis Comparativo de Capacidad y Desviación de Leads")
     st.caption(f"Evaluación diaria de Meta LE basada en Agentes Contratados ({agentes_contratados_input} menos {ausentismo_teorico_input:.1%} ausentismo teórico = {agentes_contratados_input * (1 - ausentismo_teorico_input):.2f} netos). La Meta Asesor de Sábados se calcula a la mitad (4.1 / 2).")
@@ -924,9 +897,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
           unsafe_allow_html=True,
       )
 
-    # =========================================================================
-    # 📈 MÓDULO DE GRÁFICOS EJECUTIVOS: SEGUIMIENTO LE REAL VS PTO & GAP
-    # =========================================================================
+    # GRÁFICOS EJECUTIVOS LE REAL VS PTO & GAP
     st.divider()
     st.subheader("📈 Seguimiento Visual LE Real vs. Pto Diario y GAP Acumulado")
     
@@ -951,9 +922,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
       fig_barras3.update_layout(title="Seguimiento (Formato Barras)", barmode="group", height=500)
       st.plotly_chart(fig_barras3, use_container_width=True)
 
-    # =========================================================================
-    # 📉 SECCIÓN: GRÁFICO DE TENDENCIA DE APROBACIÓN (% AP — ÚLTIMOS 4 MESES)
-    # =========================================================================
+    # GRÁFICO DE TENDENCIA DE APROBACIÓN
     st.divider()
     st.subheader("📉 Tendencia AP (% Aprobación Acumulada — ÚLTIMOS 4 MESES)")
 
@@ -1016,9 +985,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     fig_tend.update_layout(title="<b>Tendencia AP</b>", xaxis=dict(title="Día del Mes"), yaxis=dict(title="% Aprobación Acumulada", ticksuffix="%"), plot_bgcolor="#ffffff", height=520, hovermode="x unified")
     st.plotly_chart(fig_tend, use_container_width=True)
 
-    # =========================================================================
-    # ⚙️ PREPARACIÓN DE DATOS & FILTROS COMPARTIDOS UNIFICADOS PARA DÍA HÁBIL
-    # =========================================================================
+    # DÍA HÁBIL Y FUNNEL
     st.divider()
     st.markdown("### 🗓️ Módulo de Análisis por Día Hábil y Funnel (ÚLTIMOS MESES)")
 
@@ -1147,9 +1114,6 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
           key="shared_dh_select"
       )
 
-    # =========================================================================
-    # 🗓️ MÓDULO 1: ANÁLISIS POR DÍA HÁBIL & PROYECCIÓN DE MADURACIÓN AP MES
-    # =========================================================================
     st.subheader("🗓️ Análisis por Día Hábil & Proyección de Maduración AP Mes")
 
     col_ctrl1, col_ctrl2 = st.columns([2.5, 1.0])
@@ -1314,9 +1278,6 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
         st.markdown("##### 📋 Matriz Comparativa Detallada por Día Hábil (AP Mes)")
         st.markdown(f'<div style="overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">{html_table}</div>', unsafe_allow_html=True)
 
-    # =========================================================================
-    # 🎯 DIAGNÓSTICO GERENCIAL DE MADURACIÓN & PROYECCIÓN AP MES
-    # =========================================================================
     df_dh_curr = (df_dh_todos[(df_dh_todos["Año"] == año_sel) & (df_dh_todos["Mes"] == mes_sel)] if "Mes" in df_dh_todos.columns and not df_dh_todos.empty else pd.DataFrame())
 
     if not df_dh_curr.empty:
@@ -1402,9 +1363,6 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
           unsafe_allow_html=True,
       )
 
-    # =========================================================================
-    # 🔄 MÓDULO 2: ANÁLISIS DE FUNNEL & ESTADO DE LEADS POR DÍA HÁBIL (ACUMULADO)
-    # =========================================================================
     st.divider()
     st.subheader("🔄 Análisis de Funnel & Estado de Leads por Día Hábil (ACUMULADO)")
 
@@ -1625,7 +1583,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO PER MES)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1643,10 +1601,48 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.title(f"👥 Análisis Operativo por Asesor y Supervisor - {mes_sel_nombre} {año_sel}")
 
   # -------------------------------------------------------------------------
-  # 0. FUNCIONES DE APOYO: META HÁBIL MÉXICO (MX) & COMISIONES POR PUNTOS
+  # 0. FUNCIONES DE APOYO & FILTRADO DE DISTRIBUCIÓN DINÁMICO POR MES
   # -------------------------------------------------------------------------
+  def obtener_distribucion_mes(df_dist, anio, mes):
+    """Filtra la hoja de distribución exactamente para el año y mes seleccionados."""
+    if df_dist.empty:
+      return df_dist
+    df_sub = df_dist.copy()
+    col_mes = next((c for c in df_sub.columns if str(c).strip().lower() in ["mes", "month", "mes_num", "num_mes", "periodo"]), None)
+    col_fecha = next((c for c in df_sub.columns if str(c).strip().lower() in ["fecha", "f_vta", "date", "fecha_dist"]), None)
+    
+    if col_fecha:
+      fechas_dt = pd.to_datetime(df_sub[col_fecha], errors='coerce')
+      mask = (fechas_dt.dt.month == mes)
+      col_anio = next((c for c in df_sub.columns if str(c).strip().lower() in ["año", "anio", "year"]), None)
+      if col_anio:
+        mask = mask & (pd.to_numeric(df_sub[col_anio], errors='coerce') == anio)
+      elif fechas_dt.dt.year.notna().any():
+        mask = mask & (fechas_dt.dt.year == anio)
+      if mask.any():
+        return df_sub[mask]
+        
+    if col_mes:
+      val_sample = df_sub[col_mes].dropna().iloc[0] if not df_sub[col_mes].dropna().empty else None
+      if isinstance(val_sample, (int, float, np.number)) or str(val_sample).isdigit():
+        mask = (pd.to_numeric(df_sub[col_mes], errors='coerce') == mes)
+      else:
+        nombres = {1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio", 7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"}
+        target_name = nombres.get(mes, "")
+        mask = df_sub[col_mes].astype(str).str.strip().str.lower().str.startswith(target_name)
+      
+      col_anio = next((c for c in df_sub.columns if str(c).strip().lower() in ["año", "anio", "year"]), None)
+      if col_anio:
+        mask = mask & (pd.to_numeric(df_sub[col_anio], errors='coerce') == anio)
+        
+      if mask.any():
+        return df_sub[mask]
+        
+    return df_sub
+
+  df_dist_mes = obtener_distribucion_mes(df_distribucion, año_sel, mes_sel)
+
   def calcular_meta_le_mx(anio, mes, hasta_dia=None):
-    """Calcula LE según días hábiles MX: L-V=4.1, Sáb=2.05, Dom y Festivos MX=0."""
     festivos_mx = holidays.Mexico(years=anio)
     num_dias = calendar.monthrange(anio, mes)[1]
     max_d = hasta_dia if hasta_dia else num_dias
@@ -1654,11 +1650,11 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     meta_acum = 0.0
     for d in range(1, max_d + 1):
       f = date(anio, mes, d)
-      if f in festivos_mx or f.weekday() == 6:  # Domingo
+      if f in festivos_mx or f.weekday() == 6:
         continue
-      elif f.weekday() == 5:  # Sábado (4.1 / 2)
+      elif f.weekday() == 5:
         meta_acum += 2.05
-      else:  # L-V
+      else:
         meta_acum += 4.10
     return meta_acum
 
@@ -1686,43 +1682,43 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     return tabla_comisiones_cop.get(pts, 0)
 
   # -------------------------------------------------------------------------
-  # 1. FILTROS LOCALES DE OPERACIÓN
+  # 1. FILTROS LOCALES DE OPERACIÓN CON SUPERVISORES DEL MES SELECCIONADO
   # -------------------------------------------------------------------------
   st.markdown("##### 🎛️ Filtros de Control Operativo (Local de la Hoja)")
   col_op_f1, col_op_f2 = st.columns(2)
 
-  supervisores_disp = ["Todos"]
-  if not df_distribucion.empty and "Supervisor" in df_distribucion.columns:
-    supervisores_disp += sorted(df_distribucion["Supervisor"].dropna().unique().tolist())
-  elif "Supervisor" in df_ventas.columns:
-    supervisores_disp += sorted(df_ventas["Supervisor"].dropna().unique().tolist())
+  supervisores_set = set()
+  if not df_dist_mes.empty and "Supervisor" in df_dist_mes.columns:
+    supervisores_set.update(df_dist_mes["Supervisor"].dropna().unique())
+  if "Supervisor" in df_ventas.columns:
+    vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]["Supervisor"].dropna().unique()
+    supervisores_set.update(vta_mes_sups)
+
+  supervisores_disp = ["Todos"] + sorted(list(supervisores_set))
 
   with col_op_f1:
     sup_sel = st.selectbox("Filtrar por Supervisor:", supervisores_disp, index=0, key="op_sup_filter")
 
-  df_dist_sub = df_distribucion.copy()
+  df_dist_sub = df_dist_mes.copy()
   if sup_sel != "Todos" and not df_dist_sub.empty and "Supervisor" in df_dist_sub.columns:
     df_dist_sub = df_dist_sub[df_dist_sub["Supervisor"] == sup_sel]
 
-  asesores_disp = ["Todos"]
+  asesores_set = set()
   if not df_dist_sub.empty and "agente" in df_dist_sub.columns:
-    asesores_disp += sorted(df_dist_sub["agente"].dropna().unique().tolist())
-  elif "agente" in df_ventas.columns:
-    asesores_disp += sorted(df_ventas["agente"].dropna().unique().tolist())
+    asesores_set.update(df_dist_sub["agente"].dropna().unique())
+  if "agente" in df_ventas.columns:
+    vta_mes_agts = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]["agente"].dropna().unique()
+    asesores_set.update(vta_mes_agts)
+
+  asesores_disp = ["Todos"] + sorted(list(asesores_set))
 
   with col_op_f2:
     asesor_op_sel = st.selectbox("Filtrar por Asesor:", asesores_disp, index=0, key="op_agt_filter")
 
   # -------------------------------------------------------------------------
-  # 2. FILTRADO DE DATASETS OPERATIVOS & CONTEO DE ASESORES ACTIVOS DEL MES
+  # 2. MAPEO Y FILTRADO DE DATASETS CON LA PLANTILLA DEL MES SELECCIONADO
   # -------------------------------------------------------------------------
   df_vta_op = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy()
-
-  if sup_sel != "Todos" and "Supervisor" in df_vta_op.columns:
-    df_vta_op = df_vta_op[df_vta_op["Supervisor"] == sup_sel]
-
-  if asesor_op_sel != "Todos" and "agente" in df_vta_op.columns:
-    df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
 
   if not df_calls.empty:
     col_fcall = "F_CALL" if "F_CALL" in df_calls.columns else next((c for c in df_calls.columns if str(c).upper() in ["FECHA", "DATE"]), None)
@@ -1730,28 +1726,68 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       df_calls_op = df_calls[(pd.to_datetime(df_calls[col_fcall]).dt.year == año_sel) & (pd.to_datetime(df_calls[col_fcall]).dt.month == mes_sel)].copy()
     else:
       df_calls_op = df_calls.copy()
-      
-    if sup_sel != "Todos" and "Supervisor" in df_calls_op.columns:
-      df_calls_op = df_calls_op[df_calls_op["Supervisor"] == sup_sel]
-    if asesor_op_sel != "Todos" and "agente" in df_calls_op.columns:
-      df_calls_op = df_calls_op[df_calls_op["agente"] == asesor_op_sel]
   else:
     df_calls_op = pd.DataFrame()
 
-  # Determinación dinámica de asesores activos que operaron en el mes
-  asesores_activos_set = set()
-  if not df_vta_op.empty and "agente" in df_vta_op.columns:
-    asesores_activos_set.update(df_vta_op["agente"].dropna().astype(str).str.strip().unique())
-  if not df_calls_op.empty and "agente" in df_calls_op.columns:
-    asesores_activos_set.update(df_calls_op["agente"].dropna().astype(str).str.strip().unique())
+  # Re-mapeo dinámico de Supervisor y Agente por id_per_clean según la distribución del mes activo
+  if not df_dist_mes.empty and "id_per_clean" in df_dist_mes.columns:
+    dist_sub_m = df_dist_mes.drop_duplicates(subset=["id_per_clean"]).copy()
+    cols_map_m = ["id_per_clean"]
+    if "Supervisor" in dist_sub_m.columns: cols_map_m.append("Supervisor")
+    if "agente" in dist_sub_m.columns: cols_map_m.append("agente")
+
+    if not df_vta_op.empty and "id_per_clean" in df_vta_op.columns:
+      df_vta_op = pd.merge(df_vta_op, dist_sub_m[cols_map_m], on="id_per_clean", how="left", suffixes=("", "_dist_m"))
+      if "Supervisor_dist_m" in df_vta_op.columns:
+        df_vta_op["Supervisor"] = df_vta_op["Supervisor_dist_m"].fillna(df_vta_op.get("Supervisor", "Sin Supervisor"))
+      if "agente_dist_m" in df_vta_op.columns:
+        df_vta_op["agente"] = df_vta_op["agente_dist_m"].fillna(df_vta_op.get("agente", "Sin Asesor"))
+
+    if not df_calls_op.empty and "id_per_clean" in df_calls_op.columns:
+      df_calls_op = pd.merge(df_calls_op, dist_sub_m[cols_map_m], on="id_per_clean", how="left", suffixes=("", "_dist_m"))
+      if "Supervisor_dist_m" in df_calls_op.columns:
+        df_calls_op["Supervisor"] = df_calls_op["Supervisor_dist_m"].fillna(df_calls_op.get("Supervisor", "Sin Supervisor"))
+      if "agente_dist_m" in df_calls_op.columns:
+        df_calls_op["agente"] = df_calls_op["agente_dist_m"].fillna(df_calls_op.get("agente", "Sin Asesor"))
+
+  if sup_sel != "Todos":
+    if "Supervisor" in df_vta_op.columns: df_vta_op = df_vta_op[df_vta_op["Supervisor"] == sup_sel]
+    if not df_calls_op.empty and "Supervisor" in df_calls_op.columns: df_calls_op = df_calls_op[df_calls_op["Supervisor"] == sup_sel]
+
+  if asesor_op_sel != "Todos":
+    if "agente" in df_vta_op.columns: df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
+    if not df_calls_op.empty and "agente" in df_calls_op.columns: df_calls_op = df_calls_op[df_calls_op["agente"] == asesor_op_sel]
+
+  # Conteo de Asesores Activos directo de la Hoja de Distribución del Mes
+  if not df_dist_mes.empty:
+    df_dist_sup_count = df_dist_mes.copy()
+    if sup_sel != "Todos" and "Supervisor" in df_dist_sup_count.columns:
+      df_dist_sup_count = df_dist_sup_count[df_dist_sup_count["Supervisor"] == sup_sel]
+    
+    if col_id_dist and col_id_dist in df_dist_sup_count.columns:
+      asesores_dist_count = len(df_dist_sup_count[col_id_dist].dropna().unique())
+    elif "agente" in df_dist_sup_count.columns:
+      asesores_dist_count = len(df_dist_sup_count["agente"].dropna().astype(str).str.strip().unique())
+    else:
+      asesores_dist_count = 0
+  else:
+    asesores_dist_count = 0
+
+  if asesores_dist_count > 0:
+    agt_activos_count = float(asesores_dist_count)
+  else:
+    asesores_activos_set = set()
+    if not df_vta_op.empty and "agente" in df_vta_op.columns:
+      asesores_activos_set.update(df_vta_op["agente"].dropna().astype(str).str.strip().unique())
+    if not df_calls_op.empty and "agente" in df_calls_op.columns:
+      asesores_activos_set.update(df_calls_op["agente"].dropna().astype(str).str.strip().unique())
+    agt_activos_count = float(len(asesores_activos_set)) if len(asesores_activos_set) > 0 else 1.0
 
   if asesor_op_sel != "Todos":
     agt_activos_count = 1.0
-  else:
-    agt_activos_count = float(len(asesores_activos_set)) if len(asesores_activos_set) > 0 else 1.0
 
   # -------------------------------------------------------------------------
-  # 3. AGRUPACIÓN COMPLETA POR ASESOR (SUMA COLUMNA PUNTOS + CRUCE COMPLETO)
+  # 3. AGRUPACIÓN COMPLETA POR ASESOR (SUMA COLUMNA PUNTOS DE VENTAS)
   # -------------------------------------------------------------------------
   col_puntos_vta = next((c for c in df_ventas.columns if str(c).strip().upper() in ["PUNTOS", "PUNTO", "PTS", "PUNTOS_VTA", "PUNTO_VTA", "PUNTOS TARJETA"]), None)
 
@@ -1815,7 +1851,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
       ap_tot = ap_m + ap_cos
 
-      # Cálculo de Puntos sumando la columna PUNTOS de la hoja de ventas para las AP dictaminadas en el mes
       if col_puntos_vta and col_puntos_vta in grp.columns:
         pts_mes = pd.to_numeric(grp.loc[ap_m_mask, col_puntos_vta], errors="coerce").fillna(1.0).sum()
         pts_cos = (pd.to_numeric(df_cos_agt[col_puntos_vta], errors="coerce").fillna(1.0).sum() if not df_cos_agt.empty and col_puntos_vta in df_cos_agt.columns else 0.0)
@@ -1890,7 +1925,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     df_matriz_agt_base = pd.DataFrame()
 
   # -------------------------------------------------------------------------
-  # 4. CÁLCULO DE KPIS GENERALES Y RECUADROS ADICIONALES REESTRUCTURADOS (3x3)
+  # 4. CÁLCULO DE KPIS GENERALES Y RECUADROS ADICIONALES (3x3 CON UMBRALES 25%/75%)
   # -------------------------------------------------------------------------
   le_op_total = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in df_vta_op.columns and not df_vta_op.empty) else 0.0
   tramites_op_total = float(len(df_vta_op))
@@ -1940,24 +1975,32 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   puntos_totales_op = df_matriz_agt_base["Puntos"].sum() if not df_matriz_agt_base.empty else ap_totales_op
   media_puntos_asesor = puntos_totales_op / agt_activos_count
 
-  # Métricas detalladas a nivel de asesor para recuadros adicionales
+  # Métricas a nivel de asesor para recuadros adicionales
   if not df_matriz_agt_base.empty:
     df_agt_only = df_matriz_agt_base[df_matriz_agt_base["Asesor"] != "TOTAL GENERAL"].copy()
     total_asesores_eval = len(df_agt_only)
 
-    cumplen_eval = int((df_agt_only["% Eval"] >= 0.30).sum())
+    # Umbral % Evaluado ajustado a 25.0%
+    cumplen_eval = int((df_agt_only["% Eval"] >= 0.25).sum())
     incumplen_eval = total_asesores_eval - cumplen_eval
 
-    cumplen_no_eval = int((df_agt_only["% No Evaluado"] < 0.70).sum())
+    # Umbral % No Evaluado ajustado a 75.0%
+    cumplen_no_eval = int((df_agt_only["% No Evaluado"] < 0.75).sum())
     incumplen_no_eval = total_asesores_eval - cumplen_no_eval
 
+    # Asesores Comisionando (Comisión COP > 0)
     asesores_comisionando_count = int((df_agt_only["Comisión COP"] > 0).sum())
     pct_comisionando = (asesores_comisionando_count / total_asesores_eval * 100.0) if total_asesores_eval > 0 else 0.0
     monto_total_comisiones = df_agt_only["Comisión COP"].sum()
 
+    # CR% Conversión vs Media
     cr_media_op = (tramites_op_total / llamadas_op_total) if llamadas_op_total > 0 else 0.0
     cumplen_cr = int((df_agt_only["CR / Llamadas"] >= cr_media_op).sum())
     incumplen_cr = total_asesores_eval - cumplen_cr
+
+    # Media de llamadas por asesor: igual o por debajo de la media cumplen, por encima incumplen
+    cumplen_llamadas = int((df_agt_only["Llamadas Efectivas"] <= media_llamadas_asesor).sum())
+    incumplen_llamadas = total_asesores_eval - cumplen_llamadas
   else:
     total_asesores_eval = 0
     cumplen_eval = 0
@@ -1970,9 +2013,11 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     cr_media_op = 0.0
     cumplen_cr = 0
     incumplen_cr = 0
+    cumplen_llamadas = 0
+    incumplen_llamadas = 0
 
   # -------------------------------------------------------------------------
-  # RECUADROS KPI SUPERIORES (FILA 3x3 COMPLETA)
+  # RECUADROS KPI SUPERIORES (FILA 3x3 COMPLETA REAJUSTADA)
   # -------------------------------------------------------------------------
   col_kpi_r1, col_kpi_r2, col_kpi_r3 = st.columns(3)
 
@@ -2001,8 +2046,8 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     <div class="kpi-card">
         <div class="kpi-title">MEDIA LLAMADAS POR ASESOR</div>
         <div class="kpi-value">{media_llamadas_asesor:,.1f}</div>
-        <div class="kpi-subtext">Llamadas Totales (Col E): <b>{int(llamadas_op_total):,}</b></div>
-        <div class="kpi-subtext">Asesores Activos del Mes: <b>{int(agt_activos_count)}</b></div>
+        <div class="kpi-subtext">Llamadas Totales (Col E): <b>{int(llamadas_op_total):,}</b> | Asesores Activos: <b>{int(agt_activos_count)}</b></div>
+        <div class="kpi-subtext">Cumplen (≤Media): <b style="color:#15803d;">{cumplen_llamadas}</b> | Incumplen (>Media): <b style="color:#b91c1c;">{incumplen_llamadas}</b></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2046,8 +2091,8 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     <div class="kpi-card">
         <div class="kpi-title">% EVALUADO OPERACIÓN</div>
         <div class="kpi-value">{pct_eval_op:.1f}%</div>
-        <div class="kpi-subtext">Objetivo Operación: <b>≥ 30.0%</b></div>
-        <div class="kpi-subtext">Cumplen (≥30%): <b style="color:#15803d;">{cumplen_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_eval}</b></div>
+        <div class="kpi-subtext">Objetivo Operación: <b>≥ 25.0%</b></div>
+        <div class="kpi-subtext">Cumplen (≥25%): <b style="color:#15803d;">{cumplen_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_eval}</b></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2057,8 +2102,8 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     <div class="kpi-card">
         <div class="kpi-title">% NO EVALUADO OPERACIÓN</div>
         <div class="kpi-value">{pct_no_eval_op:.1f}%</div>
-        <div class="kpi-subtext">Objetivo Operación: <b>< 70.0%</b></div>
-        <div class="kpi-subtext">Cumplen (<70%): <b style="color:#15803d;">{cumplen_no_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_no_eval}</b></div>
+        <div class="kpi-subtext">Objetivo Operación: <b>< 75.0%</b></div>
+        <div class="kpi-subtext">Cumplen (<75%): <b style="color:#15803d;">{cumplen_no_eval}</b> | Incumplen: <b style="color:#b91c1c;">{incumplen_no_eval}</b></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2076,7 +2121,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.subheader("📋 Matriz Comparativa Operativa por Asesor")
 
   # -------------------------------------------------------------------------
-  # 5. MOSTRAR MATRIZ TABULAR FINAL CON DESBORDAMIENTO & TOTAL GENERAL
+  # 5. MATRIZ TABULAR FINAL OPERATIVA CON DESBORDAMIENTO & TOTAL GENERAL
   # -------------------------------------------------------------------------
   if not df_matriz_agt_base.empty:
     df_matriz_agt = df_matriz_agt_base.copy()
