@@ -1583,7 +1583,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (TABLAS DIVIDIDAS)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CON FORMATO CONDICIONAL COMPLETO)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -2178,18 +2178,172 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
         "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}", "Comisión COP": "${:,.0f}"
     }
 
-    def resaltar_desbordamiento(val):
-      if not isinstance(val, (int, float, np.number)): return ""
-      if val > 0: return "background-color: #dcfce7; color: #15803d; font-weight: bold;"
-      if val < 0: return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
-      return ""
+    rgb_green = (162, 217, 163)
+    rgb_orange = (254, 210, 120)
+    rgb_red = (248, 140, 140)
+    rgb_white = (255, 255, 255)
+
+    # FORMATO CONDICIONAL PARA TABLA 1 (PRODUCTIVIDAD OPERATIVA POR ASESOR)
+    def aplicar_condicionales_t1(df_input):
+      styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
+      df_no_tot = df_input[df_input["Asesor"] != "TOTAL GENERAL"]
+      
+      media_llamadas = df_no_tot["Llamadas Efectivas"].mean() if not df_no_tot.empty else 0.0
+      max_dist_llam = max(
+          (df_no_tot["Llamadas Efectivas"].max() - 1.1 * media_llamadas) if not df_no_tot.empty else 1.0,
+          (0.9 * media_llamadas - df_no_tot["Llamadas Efectivas"].min()) if not df_no_tot.empty else 1.0,
+          1.0
+      )
+      
+      min_max = {}
+      for col in ["% Cump LE", "CR / Llamadas", "% LE", "% AP Mes", "% AP Total"]:
+        if col in df_no_tot.columns:
+          s = pd.to_numeric(df_no_tot[col], errors="coerce").dropna()
+          min_max[col] = (s.min() if not s.empty else 0.0, s.max() if not s.empty else 1.0)
+        else:
+          min_max[col] = (0.0, 1.0)
+
+      for idx, row in df_input.iterrows():
+        is_total = (row["Asesor"] == "TOTAL GENERAL")
+        if is_total:
+          styles.loc[idx, :] = "font-weight: bold; background-color: #f0f2f6; text-align: center !important;"
+          continue
+            
+        for col in df_input.columns:
+          cell_style = "text-align: center !important;"
+          val = row[col]
+          
+          if isinstance(val, (int, float, np.number)) and not pd.isna(val):
+            # 1. Llamadas Efectivas (media ± 10% en verde, alejándose en rojo)
+            if col == "Llamadas Efectivas":
+              lb, ub = 0.9 * media_llamadas, 1.1 * media_llamadas
+              if lb <= val <= ub:
+                bg = "background-color: #dcfce7; color: #15803d; font-weight: bold;"
+              else:
+                dist = val - ub if val > ub else lb - val
+                norm = min(1.0, max(0.0, dist / max_dist_llam))
+                r = int(254 + norm * (239 - 254))
+                g = int(226 + norm * (68 - 226))
+                b = int(226 + norm * (68 - 226))
+                bg = f"background-color: rgb({r}, {g}, {b}); color: #7f1d1d; font-weight: bold;"
+              cell_style += " " + bg
+                    
+            # 2. % Cump LE, CR / Llamadas, % LE -> Verde a Rojo con Naranja Intermedio
+            elif col in ["% Cump LE", "CR / Llamadas", "% LE"]:
+              vmin, vmax = min_max[col]
+              bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
+              if bg: cell_style += " " + bg
+
+            # 3. Desbordamiento de llamadas
+            elif col in ["Desbordamiento / Llamadas", "% Desbordamiento"]:
+              if val > 0: bg = "background-color: #dcfce7; color: #15803d; font-weight: bold;"
+              elif val < 0: bg = "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
+              else: bg = ""
+              if bg: cell_style += " " + bg
+                    
+            # 4. Total AP -> Rangos (0-1: Rojo, 2-3: Naranja, 4: Verde claro, >=5: Verde)
+            elif col == "Total AP":
+              if val <= 1:
+                bg = "background-color: #fee2e2; color: #991b1b; font-weight: bold;"
+              elif val <= 3:
+                bg = "background-color: #ffedd5; color: #9a3412; font-weight: bold;"
+              elif val == 4:
+                bg = "background-color: #d1fae5; color: #065f46; font-weight: bold;"
+              else:
+                bg = "background-color: #a7f3d0; color: #047857; font-weight: bold;"
+              cell_style += " " + bg
+
+            # 5. % AP Mes & % AP Total -> Verde a Blanco
+            elif col in ["% AP Mes", "% AP Total"]:
+              vmin, vmax = min_max[col]
+              bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
+              if bg: cell_style += " " + bg
+
+          styles.loc[idx, col] = cell_style
+
+      return styles
+
+    # FORMATO CONDICIONAL PARA TABLA 2 (CONVERSIÓN Y EFECTIVIDAD POR ASESOR)
+    def aplicar_condicionales_t2(df_input):
+      styles = pd.DataFrame("", index=df_input.index, columns=df_input.columns)
+      df_no_tot = df_input[df_input["Asesor"] != "TOTAL GENERAL"]
+      
+      min_max = {}
+      for col in ["% Eval", "% AP Mes", "% AP Total", "Comisión COP"]:
+        if col in df_no_tot.columns:
+          s = pd.to_numeric(df_no_tot[col], errors="coerce").dropna()
+          min_max[col] = (s.min() if not s.empty else 0.0, s.max() if not s.empty else 1.0)
+        else:
+          min_max[col] = (0.0, 1.0)
+
+      for idx, row in df_input.iterrows():
+        is_total = (row["Asesor"] == "TOTAL GENERAL")
+        if is_total:
+          styles.loc[idx, :] = "font-weight: bold; background-color: #f0f2f6; text-align: center !important;"
+          continue
+            
+        for col in df_input.columns:
+          cell_style = "text-align: center !important;"
+          val = row[col]
+          
+          if isinstance(val, (int, float, np.number)) and not pd.isna(val):
+            # 1. % Eval -> Verde (máx) a Rojo (mín) con Naranja Intermedio
+            if col == "% Eval":
+              vmin, vmax = min_max[col]
+              bg = interpolate_color_3pt(val, vmin, vmax, rgb_red, rgb_orange, rgb_green)
+              if bg: cell_style += " " + bg
+                    
+            # 2. % No Evaluado -> > 75% degradado desde rojo tenue a rojo intenso
+            elif col == "% No Evaluado":
+              if val > 0.75:
+                norm = min(1.0, (val - 0.75) / 0.25)
+                r = int(254 + norm * (239 - 254))
+                g = int(226 + norm * (68 - 226))
+                b = int(226 + norm * (68 - 226))
+                bg = f"background-color: rgb({r}, {g}, {b}); color: #7f1d1d; font-weight: bold;"
+                cell_style += " " + bg
+                        
+            # 3. Total AP -> Rangos
+            elif col == "Total AP":
+              if val <= 1:
+                bg = "background-color: #fee2e2; color: #991b1b; font-weight: bold;"
+              elif val <= 3:
+                bg = "background-color: #ffedd5; color: #9a3412; font-weight: bold;"
+              elif val == 4:
+                bg = "background-color: #d1fae5; color: #065f46; font-weight: bold;"
+              else:
+                bg = "background-color: #a7f3d0; color: #047857; font-weight: bold;"
+              cell_style += " " + bg
+
+            # 4. % AP Mes & % AP Total -> Verde a Blanco
+            elif col in ["% AP Mes", "% AP Total"]:
+              vmin, vmax = min_max[col]
+              bg = interpolate_color_2pt(val, vmin, vmax, rgb_white, rgb_green)
+              if bg: cell_style += " " + bg
+
+            # 5. Comisión COP -> > $0 verde claro a verde intenso
+            elif col == "Comisión COP":
+              if val > 0:
+                vmin, vmax = min_max[col]
+                vmax_pos = max(vmax, 1.0)
+                norm = min(1.0, max(0.0, val / vmax_pos))
+                r = int(220 + norm * (34 - 220))
+                g = int(252 + norm * (197 - 252))
+                b = int(231 + norm * (94 - 231))
+                color_txt = "#ffffff" if norm > 0.6 else "#065f46"
+                bg = f"background-color: rgb({r}, {g}, {b}); color: {color_txt}; font-weight: bold;"
+                cell_style += " " + bg
+
+          styles.loc[idx, col] = cell_style
+
+      return styles
 
     # TABLA 1: MATRIZ DE PRODUCTIVIDAD OPERATIVA
     st.subheader("📊 Matriz de Productividad Operativa por Asesor")
     styler_prod = (
         df_productividad.style.format(format_prod_dict)
         .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
-        .map(resaltar_desbordamiento, subset=["Desbordamiento / Llamadas", "% Desbordamiento"])
+        .apply(aplicar_condicionales_t1, axis=None)
     )
     st.dataframe(styler_prod, use_container_width=True, height=520, hide_index=True)
 
@@ -2200,6 +2354,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     styler_conv = (
         df_conversion.style.format(format_conv_dict)
         .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+        .apply(aplicar_condicionales_t2, axis=None)
     )
     st.dataframe(styler_conv, use_container_width=True, height=520, hide_index=True)
 
