@@ -2365,7 +2365,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           key="op_asesor_historico_select"
       )
 
-      def agrupar_historico_asesor(asesor_nom, df_vta, df_calls_full):
+      def agrupar_historico_asesor(asesor_nom, df_vta, df_calls_full, df_dist_full):
         if df_vta.empty or not asesor_nom:
           return pd.DataFrame(), pd.DataFrame()
         
@@ -2377,6 +2377,17 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
         sub_vta["Mes_Num"] = pd.to_datetime(sub_vta["F_VTA"]).dt.month
         
         periodos = sub_vta[["Año", "Mes_Num"]].drop_duplicates().sort_values(by=["Año", "Mes_Num"])
+
+        # Identificadores (IDs) del asesor para cruzado exacto de llamadas y supervisor
+        agent_ids = set()
+        if "id_per_clean" in sub_vta.columns:
+          agent_ids.update(sub_vta["id_per_clean"].dropna().unique())
+        if not df_dist_full.empty:
+          col_agt_d = next((c for c in df_dist_full.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
+          col_id_d = "id_per_clean" if "id_per_clean" in df_dist_full.columns else next((c for c in df_dist_full.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
+          if col_agt_d and col_id_d:
+            sub_d_ids = df_dist_full[df_dist_full[col_agt_d].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()]
+            agent_ids.update(pd.to_numeric(sub_d_ids[col_id_d], errors="coerce").dropna().unique())
         
         recs_prod = []
         recs_conv = []
@@ -2386,21 +2397,76 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           mes_nom = f"{nombres_meses.get(m, str(m))} {y}"
           
           vta_m = sub_vta[(sub_vta["Año"] == y) & (sub_vta["Mes_Num"] == m)]
-          sup_agt = vta_m["Supervisor"].iloc[0] if ("Supervisor" in vta_m.columns and pd.notna(vta_m["Supervisor"].iloc[0])) else "-"
           
+          # Búsqueda dinámica del Supervisor por mes
+          sup_agt = "-"
+          if "Supervisor" in vta_m.columns:
+            valid_sups = [str(s).strip() for s in vta_m["Supervisor"].dropna() if str(s).strip() and str(s).strip().upper() not in ["-", "NAN", "NONE", "SIN SUPERVISOR"]]
+            if valid_sups:
+              sup_agt = valid_sups[0]
+              
+          if sup_agt == "-" and not df_dist_full.empty:
+            dist_m = obtener_distribucion_mes(df_dist_full, y, m)
+            if not dist_m.empty:
+              col_sup_d = next((c for c in dist_m.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+              col_agt_d = next((c for c in dist_m.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
+              col_id_d = "id_per_clean" if "id_per_clean" in dist_m.columns else next((c for c in dist_m.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
+              
+              mask_d = pd.Series(False, index=dist_m.index)
+              if col_agt_d:
+                mask_d = mask_d | (dist_m[col_agt_d].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper())
+              if col_id_d and agent_ids:
+                mask_d = mask_d | (pd.to_numeric(dist_m[col_id_d], errors="coerce").isin(agent_ids))
+                
+              sub_d = dist_m[mask_d]
+              if not sub_d.empty and col_sup_d:
+                valid = [str(s).strip() for s in sub_d[col_sup_d].dropna() if str(s).strip() and str(s).strip().upper() not in ["-", "NAN", "NONE", "SIN SUPERVISOR"]]
+                if valid:
+                  sup_agt = valid[0]
+                  
+          if sup_agt == "-" and not df_dist_full.empty:
+            col_sup_d = next((c for c in df_dist_full.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+            col_agt_d = next((c for c in df_dist_full.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
+            col_id_d = "id_per_clean" if "id_per_clean" in df_dist_full.columns else next((c for c in df_dist_full.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
+            
+            mask_d = pd.Series(False, index=df_dist_full.index)
+            if col_agt_d:
+              mask_d = mask_d | (df_dist_full[col_agt_d].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper())
+            if col_id_d and agent_ids:
+              mask_d = mask_d | (pd.to_numeric(df_dist_full[col_id_d], errors="coerce").isin(agent_ids))
+              
+            sub_d = df_dist_full[mask_d]
+            if not sub_d.empty and col_sup_d:
+              valid = [str(s).strip() for s in sub_d[col_sup_d].dropna() if str(s).strip() and str(s).strip().upper() not in ["-", "NAN", "NONE", "SIN SUPERVISOR"]]
+              if valid:
+                sup_agt = valid[0]
+
+          # Búsqueda dinámica de Llamadas Efectivas por mes y año
           calls_m = 0.0
           if not df_calls_full.empty:
-            col_agt_c = "agente" if "agente" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["asesor", "agente", "nombre"]), df_calls_full.columns[0])
             col_f_c = "F_CALL" if "F_CALL" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["fecha", "f_call", "date"]), None)
             col_val_c = "Calls_Val" if "Calls_Val" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["calls", "llamadas_val", "llamadas"]), df_calls_full.columns[-1])
             
             if col_f_c:
-              sub_c = df_calls_full[
-                  (df_calls_full[col_agt_c].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()) &
-                  (pd.to_datetime(df_calls_full[col_f_c]).dt.year == y) &
-                  (pd.to_datetime(df_calls_full[col_f_c]).dt.month == m)
-              ]
-              calls_m = float(pd.to_numeric(sub_c[col_val_c], errors="coerce").sum()) if not sub_c.empty else 0.0
+              dates_dt = pd.to_datetime(df_calls_full[col_f_c], errors="coerce")
+              mask_date = (dates_dt.dt.year == y) & (dates_dt.dt.month == m)
+              
+              mask_id = pd.Series(False, index=df_calls_full.index)
+              if agent_ids and "id_per_clean" in df_calls_full.columns:
+                mask_id = df_calls_full["id_per_clean"].isin(agent_ids)
+              elif agent_ids:
+                col_id_c = next((c for c in df_calls_full.columns if str(c).strip().lower() in ["id_user", "id_per", "id"]), None)
+                if col_id_c:
+                  mask_id = pd.to_numeric(df_calls_full[col_id_c], errors="coerce").isin(agent_ids)
+                  
+              mask_name = pd.Series(False, index=df_calls_full.index)
+              col_agt_c = next((c for c in df_calls_full.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
+              if col_agt_c:
+                mask_name = df_calls_full[col_agt_c].astype(str).str.strip().str.upper() == str(asesor_nom).strip().upper()
+                
+              sub_c = df_calls_full[mask_date & (mask_id | mask_name)]
+              if not sub_c.empty:
+                calls_m = float(pd.to_numeric(sub_c[col_val_c], errors="coerce").fillna(0).sum())
 
           is_le = vta_m["ESTADO"] == "LEAD EFECTIVO" if "ESTADO" in vta_m.columns else pd.Series(True, index=vta_m.index)
           dec = vta_m["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in vta_m.columns else pd.Series("", index=vta_m.index)
@@ -2510,7 +2576,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
         return pd.DataFrame(recs_prod), pd.DataFrame(recs_conv)
 
-      df_hist_prod, df_hist_conv = agrupar_historico_asesor(asesor_hist_sel, df_ventas, df_calls)
+      df_hist_prod, df_hist_conv = agrupar_historico_asesor(asesor_hist_sel, df_ventas, df_calls, df_distribucion)
 
       if not df_hist_prod.empty:
         tot_h_p = df_hist_prod.sum(numeric_only=True).to_dict()
