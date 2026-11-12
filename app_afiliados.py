@@ -2643,21 +2643,32 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     # 1. Filtros de Fecha General (Barra Lateral + Filtros del Módulo)
     st.sidebar.header("🔍 Filtros de Fecha Módulo 3")
 
-    fechas_validas_vta = pd.Series(df_ventas["F_VTA"] if "F_VTA" in df_ventas.columns else []).dropna()
-    fechas_validas_malla = pd.Series(df_malla["Fecha"] if ("df_malla" in locals() and not df_malla.empty and "Fecha" in df_malla.columns) else []).dropna()
+    fechas_validas_vta = pd.Series(df_ventas["F_VTA"] if ("df_ventas" in locals() and not df_ventas.empty and "F_VTA" in df_ventas.columns) else []).dropna()
+    
+    col_malla_f_gen = "Fecha"
+    if "df_malla" in locals() and not df_malla.empty:
+        col_malla_f_gen = next((c for c in df_malla.columns if str(c).strip().lower() in ["fecha", "f_malla", "date"]), df_malla.columns[0])
+        fechas_validas_malla = pd.Series(df_malla[col_malla_f_gen]).dropna()
+    else:
+        fechas_validas_malla = pd.Series([], dtype=object)
+
     all_fechas = pd.concat([fechas_validas_vta, fechas_validas_malla]).dropna()
     
-    años_disp = sorted(pd.to_datetime(all_fechas).dt.year.unique()) if not all_fechas.empty else [date.today().year]
+    años_disp = sorted(pd.to_datetime(all_fechas, errors="coerce").dt.year.dropna().unique().astype(int)) if not all_fechas.empty else [date.today().year]
     año_sel = st.sidebar.selectbox("Año Operativo", años_disp, index=len(años_disp) - 1, key="m3_año_sel")
 
-    meses_disp = sorted(pd.to_datetime(all_fechas[pd.to_datetime(all_fechas).dt.year == año_sel]).dt.month.unique()) if not all_fechas.empty else [date.today().month]
+    fechas_año = all_fechas[pd.to_datetime(all_fechas, errors="coerce").dt.year == año_sel]
+    meses_disp = sorted(pd.to_datetime(fechas_año, errors="coerce").dt.month.dropna().unique().astype(int)) if not fechas_año.empty else [date.today().month]
+    
     nombres_meses = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
+    inv_nombres_meses = {v: k for k, v in nombres_meses.items()}
+    
     mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
     mes_sel_nombre = st.sidebar.selectbox("Mes Operativo", mes_formateado, index=len(mes_formateado) - 1, key="m3_mes_sel") if mes_formateado else "Noviembre"
-    mes_sel = list(nombres_meses.keys())[list(nombres_meses.values()).index(mes_sel_nombre)]
+    mes_sel = inv_nombres_meses.get(mes_sel_nombre, date.today().month)
 
     # Obtener fechas disponibles dentro del mes seleccionado
-    fechas_mes_disp = sorted(pd.to_datetime(all_fechas[(pd.to_datetime(all_fechas).dt.year == año_sel) & (pd.to_datetime(all_fechas).dt.month == mes_sel)]).dt.date.unique())
+    fechas_mes_disp = sorted(pd.to_datetime(all_fechas[(pd.to_datetime(all_fechas, errors="coerce").dt.year == año_sel) & (pd.to_datetime(all_fechas, errors="coerce").dt.month == mes_sel)], errors="coerce").dt.date.unique())
     if not fechas_mes_disp:
         fechas_mes_disp = [date(año_sel, mes_sel, 1)]
 
@@ -2674,32 +2685,33 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             key="m3_fecha_dia_sel"
         )
 
-    # Filtrar distribucion del mes
-    df_dist_mes_m3 = df_distribucion.copy()
-    if not df_distribucion.empty:
-        col_m_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["mes", "month", "mes_num"]), None)
+    # Filtrar distribución del mes
+    df_dist_mes_m3 = df_distribucion.copy() if ("df_distribucion" in locals() and not df_distribucion.empty) else pd.DataFrame()
+    if not df_dist_mes_m3.empty:
+        col_m_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["mes", "month", "mes_num"]), None)
         if col_m_dist:
-            df_dist_mes_m3 = df_distribucion[pd.to_numeric(df_distribucion[col_m_dist], errors="coerce") == mes_sel]
-            if df_dist_mes_m3.empty: df_dist_mes_m3 = df_distribucion
+            sub_d = df_dist_mes_m3[pd.to_numeric(df_dist_mes_m3[col_m_dist], errors="coerce") == mes_sel]
+            if not sub_d.empty:
+                df_dist_mes_m3 = sub_d
 
     supervisores_set = set()
     if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
         supervisores_set.update(df_dist_mes_m3["Supervisor"].dropna().unique())
-    if "Supervisor" in df_ventas.columns:
-        vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]["Supervisor"].dropna().unique()
+    if "df_ventas" in locals() and not df_ventas.empty and "Supervisor" in df_ventas.columns:
+        vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)]["Supervisor"].dropna().unique()
         supervisores_set.update(vta_mes_sups)
 
-    supervisores_disp = ["Todos"] + sorted([s for s in list(supervisores_set) if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-"]])
+    supervisores_disp = ["Todos"] + sorted([str(s).strip() for s in list(supervisores_set) if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]])
 
     with c_f2:
         sup_sel_m3 = st.selectbox("Supervisor:", supervisores_disp, index=0, key="m3_sup_filter")
 
-    df_vta_m3_base = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy()
-    if sup_sel_m3 != "Todos" and "Supervisor" in df_vta_m3_base.columns:
+    df_vta_m3_base = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)].copy() if ("df_ventas" in locals() and not df_ventas.empty) else pd.DataFrame()
+    if sup_sel_m3 != "Todos" and not df_vta_m3_base.empty and "Supervisor" in df_vta_m3_base.columns:
         df_vta_m3_base = df_vta_m3_base[df_vta_m3_base["Supervisor"] == sup_sel_m3]
 
     asesores_set = set()
-    if "agente" in df_vta_m3_base.columns:
+    if not df_vta_m3_base.empty and "agente" in df_vta_m3_base.columns:
         asesores_set.update(df_vta_m3_base["agente"].dropna().unique())
     if not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns:
         if sup_sel_m3 != "Todos" and "Supervisor" in df_dist_mes_m3.columns:
@@ -2708,7 +2720,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         else:
             asesores_set.update(df_dist_mes_m3["agente"].dropna().unique())
 
-    asesores_disp = ["Todos"] + sorted([a for a in list(asesores_set) if str(a).strip() and str(a).upper() not in ["NAN", "NONE", "-"]])
+    asesores_disp = ["Todos"] + sorted([str(a).strip() for a in list(asesores_set) if str(a).strip() and str(a).upper() not in ["NAN", "NONE", "-"]])
 
     with c_f3:
         asesor_sel_m3 = st.selectbox("Asesor:", asesores_disp, index=0, key="m3_agt_filter")
@@ -2720,13 +2732,13 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     # -------------------------------------------------------------------------
     st.subheader("1. Productividad del Día del Asesor")
 
-    df_vta_dia = df_vta_m3_base[pd.to_datetime(df_vta_m3_base["F_VTA"]).dt.date == fecha_sel_dia].copy()
+    df_vta_dia = df_vta_m3_base[pd.to_datetime(df_vta_m3_base["F_VTA"], errors="coerce").dt.date == fecha_sel_dia].copy() if not df_vta_m3_base.empty else pd.DataFrame()
 
     # Malla día
-    if not df_malla.empty:
-        col_malla_f = "Fecha" if "Fecha" in df_malla.columns else next((c for c in df_malla.columns if str(c).lower() in ["fecha", "f_malla", "date"]), df_malla.columns[0])
-        df_malla_mes = df_malla[(pd.to_datetime(df_malla[col_malla_f]).dt.year == año_sel) & (pd.to_datetime(df_malla[col_malla_f]).dt.month == mes_sel)].copy()
-        df_malla_dia = df_malla_mes[pd.to_datetime(df_malla_mes[col_malla_f]).dt.date == fecha_sel_dia].copy()
+    if "df_malla" in locals() and not df_malla.empty:
+        col_malla_f = next((c for c in df_malla.columns if str(c).strip().lower() in ["fecha", "f_malla", "date"]), df_malla.columns[0])
+        df_malla_mes = df_malla[(pd.to_datetime(df_malla[col_malla_f], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_malla[col_malla_f], errors="coerce").dt.month == mes_sel)].copy()
+        df_malla_dia = df_malla_mes[pd.to_datetime(df_malla_mes[col_malla_f], errors="coerce").dt.date == fecha_sel_dia].copy()
     else:
         df_malla_mes = pd.DataFrame()
         df_malla_dia = pd.DataFrame()
@@ -2756,7 +2768,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     if asesor_sel_m3 != "Todos":
         lista_agentes_eval = [asesor_sel_m3]
     else:
-        lista_agentes_eval = sorted(list(asesores_set))
+        lista_agentes_eval = sorted([str(a).strip() for a in list(asesores_set) if str(a).strip() and str(a).upper() not in ["NAN", "NONE", "-"]])
 
     rows_asesores = []
     
@@ -2764,8 +2776,8 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         if not agt or str(agt).strip() in ["", "-", "nan", "None"]:
             continue
             
-        grp_m = df_vta_m3_base[df_vta_m3_base["agente"] == agt] if "agente" in df_vta_m3_base.columns else pd.DataFrame()
-        grp_d = df_vta_dia[df_vta_dia["agente"] == agt] if "agente" in df_vta_dia.columns else pd.DataFrame()
+        grp_m = df_vta_m3_base[df_vta_m3_base["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if (not df_vta_m3_base.empty and "agente" in df_vta_m3_base.columns) else pd.DataFrame()
+        grp_d = df_vta_dia[df_vta_dia["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if (not df_vta_dia.empty and "agente" in df_vta_dia.columns) else pd.DataFrame()
 
         # Búsqueda de Supervisor
         sup_agt = "-"
@@ -2781,7 +2793,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                 valid_s = [s for s in valid_s if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
                 if valid_s: sup_agt = valid_s[0]
 
-        # Búsqueda de ID Agente sin decimales
+        # Búsqueda de ID Agente
         id_agt_val = "-"
         if not grp_m.empty and "id_per_clean" in grp_m.columns:
             valid_ids = grp_m["id_per_clean"].dropna().unique()
@@ -2824,19 +2836,21 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         tram_m = float(len(grp_m))
         le_m = float((grp_m["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in grp_m.columns and not grp_m.empty) else 0.0
 
-        # Cálculo Dias Log y Días Programados
+        # Cálculo Días Log y Días Programados
         dias_log = 0.0
         dias_prog = 0.0
         if not df_malla_mes.empty:
             sub_malla_hasta = pd.DataFrame()
+            col_mf = next((c for c in df_malla_mes.columns if str(c).strip().lower() in ["fecha", "f_malla", "date"]), df_malla_mes.columns[0])
+            
             if id_agt_val != "-" and "id_per_clean" in df_malla_mes.columns:
                 try:
                     numeric_id = float(id_agt_val)
-                    sub_malla_hasta = df_malla_mes[(df_malla_mes["id_per_clean"] == numeric_id) & (pd.to_datetime(df_malla_mes[col_malla_f]).dt.day <= fecha_sel_dia.day)]
+                    sub_malla_hasta = df_malla_mes[(df_malla_mes["id_per_clean"] == numeric_id) & (pd.to_datetime(df_malla_mes[col_mf], errors="coerce").dt.day <= fecha_sel_dia.day)]
                 except ValueError:
-                    sub_malla_hasta = df_malla_mes[(df_malla_mes["id_per_clean"].astype(str) == id_agt_val) & (pd.to_datetime(df_malla_mes[col_malla_f]).dt.day <= fecha_sel_dia.day)]
+                    sub_malla_hasta = df_malla_mes[(df_malla_mes["id_per_clean"].astype(str) == id_agt_val) & (pd.to_datetime(df_malla_mes[col_mf], errors="coerce").dt.day <= fecha_sel_dia.day)]
             if sub_malla_hasta.empty and "agente" in df_malla_mes.columns:
-                sub_malla_hasta = df_malla_mes[(df_malla_mes["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()) & (pd.to_datetime(df_malla_mes[col_malla_f]).dt.day <= fecha_sel_dia.day)]
+                sub_malla_hasta = df_malla_mes[(df_malla_mes["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()) & (pd.to_datetime(df_malla_mes[col_mf], errors="coerce").dt.day <= fecha_sel_dia.day)]
                 
             if not sub_malla_hasta.empty:
                 col_val = next((c for c in sub_malla_hasta.columns if str(c).upper() in ["VALORES", "VALOR", "HORAS"]), sub_malla_hasta.columns[64] if len(sub_malla_hasta.columns) > 64 else None)
@@ -2860,26 +2874,27 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
         # AP Metrics
         inicio_m = date(año_sel, mes_sel, 1)
-        ap_m = float(((grp_m["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp_m["F_DEC_EFF"]).dt.year == año_sel) & (pd.to_datetime(grp_m["F_DEC_EFF"]).dt.month == mes_sel) & (grp_m["DECISION"] == "A")).sum()) if ("ESTADO" in grp_m.columns and "DECISION" in grp_m.columns and not grp_m.empty) else 0.0
+        ap_m = float(((grp_m["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp_m["F_DEC_EFF"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(grp_m["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) & (grp_m["DECISION"] == "A")).sum()) if ("ESTADO" in grp_m.columns and "DECISION" in grp_m.columns and not grp_m.empty) else 0.0
         
         df_cos_agt = df_ventas[
             (df_ventas["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()) &
-            (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.year == año_sel) &
-            (pd.to_datetime(df_ventas["F_DEC_EFF"]).dt.month == mes_sel) &
-            (pd.to_datetime(df_ventas["F_VTA"]) < pd.Timestamp(inicio_m)) &
+            (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.year == año_sel) &
+            (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) &
+            (pd.to_datetime(df_ventas["F_VTA"], errors="coerce") < pd.Timestamp(inicio_m)) &
             (df_ventas["DECISION"].astype(str).str.strip().str.upper() == "A")
-        ] if not df_ventas.empty else pd.DataFrame()
+        ] if ("df_ventas" in locals() and not df_ventas.empty and "agente" in df_ventas.columns and "F_DEC_EFF" in df_ventas.columns and "DECISION" in df_ventas.columns) else pd.DataFrame()
+        
         ap_cos = float(len(df_cos_agt))
         tot_ap = ap_m + ap_cos
         pct_ap_m = (ap_m / le_m) if le_m > 0 else 0.0
 
         # Telefonía & Tiempos
         calls_d = 0.0
-        if not df_calls.empty:
+        if "df_calls" in locals() and not df_calls.empty:
             col_fc = "F_CALL" if "F_CALL" in df_calls.columns else next((c for c in df_calls.columns if str(c).upper() in ["FECHA", "DATE"]), None)
             col_vc = "Calls_Val" if "Calls_Val" in df_calls.columns else next((c for c in df_calls.columns if str(c).upper() in ["CALLS", "LLAMADAS"]), None)
-            if col_fc and col_vc:
-                sub_c_d = df_calls[(pd.to_datetime(df_calls[col_fc]).dt.date == fecha_sel_dia) & (df_calls["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper())]
+            if col_fc and col_vc and "agente" in df_calls.columns:
+                sub_c_d = df_calls[(pd.to_datetime(df_calls[col_fc], errors="coerce").dt.date == fecha_sel_dia) & (df_calls["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper())]
                 if not sub_c_d.empty:
                     calls_d = float(pd.to_numeric(sub_c_d[col_vc], errors="coerce").fillna(0).sum())
 
@@ -2912,7 +2927,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
         # Puntos & Tarjetas Platinum
         sub_a = grp_m[grp_m["DECISION"] == "A"] if ("DECISION" in grp_m.columns and not grp_m.empty) else pd.DataFrame()
-        col_card = next((c for c in grp_m.columns if str(c).upper() in ["NOMBRE_TARJETA", "TARJETA", "PRODUCTO", "CARD"]), None)
+        col_card = next((c for c in grp_m.columns if str(c).upper() in ["NOMBRE_TARJETA", "TARJETA", "PRODUCTO", "CARD"]), None) if not grp_m.empty else None
         
         grcc_plat = 0
         rcp_plat = 0
@@ -2977,6 +2992,10 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     if not df_res_asesores.empty:
         # Fila TOTAL
+        tot_dias_prog_a = df_res_asesores["Días programados"].sum()
+        tot_dias_log_a = df_res_asesores["Dias Log"].sum()
+        pct_aus_tot_a = f"{(1.0 - (tot_dias_log_a / tot_dias_prog_a)):.1%}" if tot_dias_prog_a > 0 else "-"
+
         tot_row_a = {
             "Asesor": "TOTAL GENERAL", "Supervisor": "-", "Id Agente": "-", "Estado": "-",
             "Tramites": df_res_asesores["Tramites"].sum(),
@@ -2986,10 +3005,10 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             "% Cump LE Día": (df_res_asesores["LE día"].sum() / df_res_asesores["Meta LE del día"].sum()) if df_res_asesores["Meta LE del día"].sum() > 0 else 0.0,
             "Tramites Mes": df_res_asesores["Tramites Mes"].sum(),
             "LE Mes": df_res_asesores["LE Mes"].sum(),
-            "Dias Log": df_res_asesores["Dias Log"].sum(),
-            "Prom LE Mes": (df_res_asesores["LE Mes"].sum() / df_res_asesores["Dias Log"].sum()) if df_res_asesores["Dias Log"].sum() > 0 else 0.0,
-            "Días programados": df_res_asesores["Días programados"].sum(),
-            "% ausentismo": f"{(1.0 - (df_res_asesores['Dias Log'].sum() / df_res_asesores['Días programados'].sum())):.1%}" if df_res_asesores["Días programados"].sum() > 0 else "-",
+            "Dias Log": tot_dias_log_a,
+            "Prom LE Mes": (df_res_asesores["LE Mes"].sum() / tot_dias_log_a) if tot_dias_log_a > 0 else 0.0,
+            "Días programados": tot_dias_prog_a,
+            "% ausentismo": pct_aus_tot_a,
             "AP COSECHA": df_res_asesores["AP COSECHA"].sum(),
             "AP Mes": df_res_asesores["AP Mes"].sum(),
             "Total AP": df_res_asesores["Total AP"].sum(),
@@ -3039,7 +3058,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     # -------------------------------------------------------------------------
     st.subheader("2. Resumen por Supervisor")
 
-    supervisores_activos = sorted([s for s in list(supervisores_set) if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-"]])
+    supervisores_activos = sorted([s for s in list(supervisores_set) if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]])
     if sup_sel_m3 != "Todos":
         supervisores_activos = [sup_sel_m3]
 
@@ -3146,12 +3165,12 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     ]
 
     val_rows = []
-    col_val_vta = next((c for c in df_ventas.columns if str(c).upper() in ["VALIDADOR", "VALIDADOR_NOMBRE", "NOMBRE_VALIDADOR", "NOMBRE VALIDADOR"]), None)
+    col_val_vta = next((c for c in df_ventas.columns if str(c).upper() in ["VALIDADOR", "VALIDADOR_NOMBRE", "NOMBRE_VALIDADOR", "NOMBRE VALIDADOR"]), None) if ("df_ventas" in locals() and not df_ventas.empty) else None
 
     for val in validadores_list:
-        if col_val_vta and not df_ventas.empty:
+        if col_val_vta and not df_vta_m3_base.empty:
             sub_vm = df_vta_m3_base[df_vta_m3_base[col_val_vta].astype(str).str.strip().str.upper() == val.upper()]
-            sub_vd = df_vta_dia[df_vta_dia[col_val_vta].astype(str).str.strip().str.upper() == val.upper()]
+            sub_vd = df_vta_dia[df_vta_dia[col_val_vta].astype(str).str.strip().str.upper() == val.upper()] if not df_vta_dia.empty else pd.DataFrame()
         else:
             sub_vm = pd.DataFrame()
             sub_vd = pd.DataFrame()
@@ -3173,6 +3192,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             "Agente": val,
             "Trámites": tram_d,
             "LE dia": le_d,
+            "Rem/Rech Count": rem_rech,
             "% REME/RECH": pct_rem_rech,
             "% LE": pct_le_d,
             "Trámites Mes": tram_m,
@@ -3185,19 +3205,25 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     df_res_val = pd.DataFrame(val_rows)
 
     if not df_res_val.empty:
+        tot_tram_d_v = df_res_val["Trámites"].sum()
+        tot_rem_rech_v = df_res_val["Rem/Rech Count"].sum()
+        pct_rem_rech_tot = (tot_rem_rech_v / tot_tram_d_v) if tot_tram_d_v > 0 else 0.0
+
         tot_val = {
             "Agente": "TOTAL GENERAL",
-            "Trámites": df_res_val["Trámites"].sum(),
+            "Trámites": tot_tram_d_v,
             "LE dia": df_res_val["LE dia"].sum(),
-            "% REME/RECH": (df_res_val["% REME/RECH"].mean()) if not df_res_val.empty else 0.0,
-            "% LE": (df_res_val["LE dia"].sum() / df_res_val["Trámites"].sum()) if df_res_val["Trámites"].sum() > 0 else 0.0,
+            "% REME/RECH": pct_rem_rech_tot,
+            "% LE": (df_res_val["LE dia"].sum() / tot_tram_d_v) if tot_tram_d_v > 0 else 0.0,
             "Trámites Mes": df_res_val["Trámites Mes"].sum(),
             "LE Mes": df_res_val["LE Mes"].sum(),
             "% LE Mes": (df_res_val["LE Mes"].sum() / df_res_val["Trámites Mes"].sum()) if df_res_val["Trámites Mes"].sum() > 0 else 0.0,
             "AP Mes": df_res_val["AP Mes"].sum(),
             "%AP": (df_res_val["AP Mes"].sum() / df_res_val["LE Mes"].sum()) if df_res_val["LE Mes"].sum() > 0 else 0.0
         }
-        df_res_val_full = pd.concat([df_res_val, pd.DataFrame([tot_val])], ignore_index=True)
+        
+        df_display_val = df_res_val.drop(columns=["Rem/Rech Count"])
+        df_res_val_full = pd.concat([df_display_val, pd.DataFrame([tot_val])], ignore_index=True)
 
         def style_tabla_val(df_in):
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
