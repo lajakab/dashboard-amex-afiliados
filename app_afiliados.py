@@ -3461,3 +3461,10 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             use_container_width=True,
             hide_index=True
         )
+st.write("🔍 **DIAGNÓSTICO DE COLUMNAS DE VENTAS:**")
+st.write("Total columnas en df_ventas:", len(df_ventas.columns))
+st.write("Columna 45 (AT):", df_ventas.columns[45] if len(df_ventas.columns) > 45 else "No existe")
+st.write("Columna 48 (AW):", df_ventas.columns[48] if len(df_ventas.columns) > 48 else "No existe")
+st.write("Columna 59 (BH):", df_ventas.columns[59] if len(df_ventas.columns) > 59 else "No existe")
+st.write("Columna 63 (BL Malla):", df_malla.columns[63] if len(df_malla.columns) > 63 else "No existe")
+st.write("Columna 71 (BT):", df_ventas.columns[71] if len(df_ventas.columns) > 71 else "No existe")
