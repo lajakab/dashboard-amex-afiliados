@@ -1583,7 +1583,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (AJUSTADO PER MES)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (TABLAS DIVIDIDAS)
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1729,7 +1729,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   else:
     df_calls_op = pd.DataFrame()
 
-  # Re-mapeo dinámico de Supervisor y Agente por id_per_clean según la distribución del mes activo
   if not df_dist_mes.empty and "id_per_clean" in df_dist_mes.columns:
     dist_sub_m = df_dist_mes.drop_duplicates(subset=["id_per_clean"]).copy()
     cols_map_m = ["id_per_clean"]
@@ -1758,7 +1757,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     if "agente" in df_vta_op.columns: df_vta_op = df_vta_op[df_vta_op["agente"] == asesor_op_sel]
     if not df_calls_op.empty and "agente" in df_calls_op.columns: df_calls_op = df_calls_op[df_calls_op["agente"] == asesor_op_sel]
 
-  # Conteo de Asesores Activos directo de la Hoja de Distribución del Mes
   if not df_dist_mes.empty:
     df_dist_sup_count = df_dist_mes.copy()
     if sup_sel != "Todos" and "Supervisor" in df_dist_sup_count.columns:
@@ -1975,30 +1973,24 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   puntos_totales_op = df_matriz_agt_base["Puntos"].sum() if not df_matriz_agt_base.empty else ap_totales_op
   media_puntos_asesor = puntos_totales_op / agt_activos_count
 
-  # Métricas a nivel de asesor para recuadros adicionales
   if not df_matriz_agt_base.empty:
     df_agt_only = df_matriz_agt_base[df_matriz_agt_base["Asesor"] != "TOTAL GENERAL"].copy()
     total_asesores_eval = len(df_agt_only)
 
-    # Umbral % Evaluado ajustado a 25.0%
     cumplen_eval = int((df_agt_only["% Eval"] >= 0.25).sum())
     incumplen_eval = total_asesores_eval - cumplen_eval
 
-    # Umbral % No Evaluado ajustado a 75.0%
     cumplen_no_eval = int((df_agt_only["% No Evaluado"] < 0.75).sum())
     incumplen_no_eval = total_asesores_eval - cumplen_no_eval
 
-    # Asesores Comisionando (Comisión COP > 0)
     asesores_comisionando_count = int((df_agt_only["Comisión COP"] > 0).sum())
     pct_comisionando = (asesores_comisionando_count / total_asesores_eval * 100.0) if total_asesores_eval > 0 else 0.0
     monto_total_comisiones = df_agt_only["Comisión COP"].sum()
 
-    # CR% Conversión vs Media
     cr_media_op = (tramites_op_total / llamadas_op_total) if llamadas_op_total > 0 else 0.0
     cumplen_cr = int((df_agt_only["CR / Llamadas"] >= cr_media_op).sum())
     incumplen_cr = total_asesores_eval - cumplen_cr
 
-    # Media de llamadas por asesor: igual o por debajo de la media cumplen, por encima incumplen
     cumplen_llamadas = int((df_agt_only["Llamadas Efectivas"] <= media_llamadas_asesor).sum())
     incumplen_llamadas = total_asesores_eval - cumplen_llamadas
   else:
@@ -2118,10 +2110,9 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     """, unsafe_allow_html=True)
 
   st.divider()
-  st.subheader("📋 Matriz Comparativa Operativa por Asesor")
 
   # -------------------------------------------------------------------------
-  # 5. MATRIZ TABULAR FINAL OPERATIVA CON DESBORDAMIENTO & TOTAL GENERAL
+  # 5. DOS MATRICES OPERATIVAS COMPARATIVAS INDEPENDIENTES (PRODUCTIVIDAD & CONVERSIÓN)
   # -------------------------------------------------------------------------
   if not df_matriz_agt_base.empty:
     df_matriz_agt = df_matriz_agt_base.copy()
@@ -2152,26 +2143,39 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     tot_agt["% Pend"] = (tot_agt["Pend"] / tot_agt["LE"]) if tot_agt.get("LE", 0) > 0 else 0.0
     tot_agt["% Cump Puntos"] = (tot_agt["Puntos"] / (11.0 * len(df_matriz_agt))) if len(df_matriz_agt) > 0 else 0.0
 
-    cols_orden = [
+    df_matriz_completa = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)
+
+    # DEFINICIÓN DE COLUMNAS PARA CADA TABLA
+    cols_tabla_productividad = [
         "Asesor", "Supervisor", "Llamadas Efectivas", "Trámites", "Meta LE", "LE", "% Cump LE",
         "CR / Llamadas", "Desbordamiento / Llamadas", "% Desbordamiento", "No Cap", "No Cond",
-        "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes",
-        "% AP Total", "Eval", "% Eval", "No Evaluado", "% No Evaluado", "Decl", "% Decl",
-        "Canc", "% Canc", "Pend", "% Pend", "Puntos", "% Cump Puntos", "Comisión COP"
+        "Otros", "% LE", "% REM/RECH", "AP Mes", "AP Cosecha", "Total AP", "% AP Mes", "% AP Total"
     ]
 
-    df_matriz_agt = pd.concat([df_matriz_agt, pd.DataFrame([tot_agt])], ignore_index=True)[cols_orden]
+    cols_tabla_conversion = [
+        "Asesor", "Supervisor", "LE", "Eval", "% Eval", "No Evaluado", "% No Evaluado",
+        "Decl", "% Decl", "Canc", "% Canc", "Pend", "% Pend", "AP Mes", "AP Cosecha",
+        "Total AP", "% AP Mes", "% AP Total", "Puntos", "% Cump Puntos", "Comisión COP"
+    ]
 
-    format_agt_dict = {
+    df_productividad = df_matriz_completa[cols_tabla_productividad].copy()
+    df_conversion = df_matriz_completa[cols_tabla_conversion].copy()
+
+    # DICCIONARIOS DE FORMATO ESPECÍFICOS
+    format_prod_dict = {
         "Llamadas Efectivas": "{:,.0f}", "Trámites": "{:,.0f}", "Meta LE": "{:,.1f}", "LE": "{:,.0f}",
         "% Cump LE": "{:.1%}", "CR / Llamadas": "{:.1%}", "Desbordamiento / Llamadas": "{:+,.0f}",
         "% Desbordamiento": "{:+.1%}", "No Cap": "{:,.0f}", "No Cond": "{:,.0f}", "Otros": "{:,.0f}",
         "% LE": "{:.1%}", "% REM/RECH": "{:.1%}", "AP Mes": "{:,.0f}", "AP Cosecha": "{:,.0f}",
-        "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
-        "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}", "% No Evaluado": "{:.1%}",
-        "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}", "% Canc": "{:.1%}",
-        "Pend": "{:,.0f}", "% Pend": "{:.1%}", "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}",
-        "Comisión COP": "${:,.0f}"
+        "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}"
+    }
+
+    format_conv_dict = {
+        "LE": "{:,.0f}", "Eval": "{:,.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:,.0f}",
+        "% No Evaluado": "{:.1%}", "Decl": "{:,.0f}", "% Decl": "{:.1%}", "Canc": "{:,.0f}",
+        "% Canc": "{:.1%}", "Pend": "{:,.0f}", "% Pend": "{:.1%}", "AP Mes": "{:,.0f}",
+        "AP Cosecha": "{:,.0f}", "Total AP": "{:,.0f}", "% AP Mes": "{:.1%}", "% AP Total": "{:.1%}",
+        "Puntos": "{:,.1f}", "% Cump Puntos": "{:.1%}", "Comisión COP": "${:,.0f}"
     }
 
     def resaltar_desbordamiento(val):
@@ -2180,12 +2184,24 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
       if val < 0: return "background-color: #fee2e2; color: #b91c1c; font-weight: bold;"
       return ""
 
-    styler_agt = (
-        df_matriz_agt.style.format(format_agt_dict)
+    # TABLA 1: MATRIZ DE PRODUCTIVIDAD OPERATIVA
+    st.subheader("📊 Matriz de Productividad Operativa por Asesor")
+    styler_prod = (
+        df_productividad.style.format(format_prod_dict)
         .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
         .map(resaltar_desbordamiento, subset=["Desbordamiento / Llamadas", "% Desbordamiento"])
     )
+    st.dataframe(styler_prod, use_container_width=True, height=520, hide_index=True)
 
-    st.dataframe(styler_agt, use_container_width=True, height=680, hide_index=True)
+    st.divider()
+
+    # TABLA 2: MATRIZ DE CONVERSIÓN Y EFECTIVIDAD
+    st.subheader("🎯 Matriz de Conversión y Efectividad por Asesor")
+    styler_conv = (
+        df_conversion.style.format(format_conv_dict)
+        .set_properties(**{"text-align": "center !important", "font-size": "12px", "padding": "5px 3px"})
+    )
+    st.dataframe(styler_conv, use_container_width=True, height=520, hide_index=True)
+
   else:
     st.info("ℹ️ No se encontraron registros de ventas para el filtro operativo seleccionado.")
