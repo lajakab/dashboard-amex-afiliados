@@ -302,11 +302,11 @@ st.sidebar.image(
 st.sidebar.title("📌 Navegación")
 opcion_hoja = st.sidebar.radio(
     "Seleccione la Vista:",
-    ["📊 Informe Gerencial por Día", "👥 Operación - Asesores & Supervisores"]
+    ["📊 Informe Gerencial por Día", "👥 Operación - Asesores & Supervisores", "📅 Productividad Diaria"]
 )
 
 # =========================================================================
-# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA (SIN NINGÚN CAMBIO)
+# 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA
 # =========================================================================
 if opcion_hoja == "📊 Informe Gerencial por Día":
   if not df_ventas.empty and len(df_ventas.columns) > 40:
@@ -1583,7 +1583,7 @@ if opcion_hoja == "📊 Informe Gerencial por Día":
     st.warning("⚠️ No se encontró la hoja de Ventas o le faltan columnas.")
 
 # =========================================================================
-# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES (CON FORMATO CONDICIONAL & HISTÓRICO MULTIMES)
+# 👥 MÓDULO 2: ANÁLISIS OPERATIVO - ASESORES & SUPERVISORES
 # =========================================================================
 elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.sidebar.header("🔍 Filtros de Fecha General")
@@ -1604,7 +1604,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   # 0. FUNCIONES DE APOYO & FILTRADO DE DISTRIBUCIÓN DINÁMICO POR MES
   # -------------------------------------------------------------------------
   def obtener_distribucion_mes(df_dist, anio, mes):
-    """Filtra la hoja de distribución exactamente para el año y mes seleccionados."""
     if df_dist.empty:
       return df_dist
     df_sub = df_dist.copy()
@@ -1785,7 +1784,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     agt_activos_count = 1.0
 
   # -------------------------------------------------------------------------
-  # 3. AGRUPACIÓN COMPLETA POR ASESOR (SUMA COLUMNA PUNTOS DE VENTAS)
+  # 3. AGRUPACIÓN COMPLETA POR ASESOR
   # -------------------------------------------------------------------------
   col_puntos_vta = next((c for c in df_ventas.columns if str(c).strip().upper() in ["PUNTOS", "PUNTO", "PTS", "PUNTOS_VTA", "PUNTO_VTA", "PUNTOS TARJETA"]), None)
 
@@ -1923,7 +1922,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     df_matriz_agt_base = pd.DataFrame()
 
   # -------------------------------------------------------------------------
-  # 4. CÁLCULO DE KPIS GENERALES Y RECUADROS ADICIONALES (3x3 CON UMBRALES 25%/75%)
+  # 4. CÁLCULO DE KPIS GENERALES Y RECUADROS ADICIONALES
   # -------------------------------------------------------------------------
   le_op_total = float((df_vta_op["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in df_vta_op.columns and not df_vta_op.empty) else 0.0
   tramites_op_total = float(len(df_vta_op))
@@ -2009,7 +2008,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
     incumplen_llamadas = 0
 
   # -------------------------------------------------------------------------
-  # RECUADROS KPI SUPERIORES (FILA 3x3 COMPLETA REAJUSTADA)
+  # RECUADROS KPI SUPERIORES
   # -------------------------------------------------------------------------
   col_kpi_r1, col_kpi_r2, col_kpi_r3 = st.columns(3)
 
@@ -2112,7 +2111,7 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
   st.divider()
 
   # -------------------------------------------------------------------------
-  # 5. DOS MATRICES OPERATIVAS COMPARATIVAS INDEPENDIENTES (PRODUCTIVIDAD & CONVERSIÓN)
+  # 5. DOS MATRICES OPERATIVAS COMPARATIVAS INDEPENDIENTES
   # -------------------------------------------------------------------------
   if not df_matriz_agt_base.empty:
     df_matriz_agt = df_matriz_agt_base.copy()
@@ -2378,7 +2377,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
         
         periodos = sub_vta[["Año", "Mes_Num"]].drop_duplicates().sort_values(by=["Año", "Mes_Num"])
 
-        # Identificadores (IDs) del asesor para cruzado exacto de llamadas y supervisor
         agent_ids = set()
         if "id_per_clean" in sub_vta.columns:
           agent_ids.update(sub_vta["id_per_clean"].dropna().unique())
@@ -2398,7 +2396,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
           
           vta_m = sub_vta[(sub_vta["Año"] == y) & (sub_vta["Mes_Num"] == m)]
           
-          # Búsqueda dinámica del Supervisor por mes
           sup_agt = "-"
           if "Supervisor" in vta_m.columns:
             valid_sups = [str(s).strip() for s in vta_m["Supervisor"].dropna() if str(s).strip() and str(s).strip().upper() not in ["-", "NAN", "NONE", "SIN SUPERVISOR"]]
@@ -2441,7 +2438,6 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
               if valid:
                 sup_agt = valid[0]
 
-          # Búsqueda dinámica de Llamadas Efectivas por mes y año
           calls_m = 0.0
           if not df_calls_full.empty:
             col_f_c = "F_CALL" if "F_CALL" in df_calls_full.columns else next((c for c in df_calls_full.columns if str(c).strip().lower() in ["fecha", "f_call", "date"]), None)
@@ -2627,3 +2623,127 @@ elif opcion_hoja == "👥 Operación - Asesores & Supervisores":
 
   else:
     st.info("ℹ️ No se encontraron registros de ventas para el filtro operativo seleccionado.")
+
+# =========================================================================
+# 📅 MÓDULO 3: PRODUCTIVIDAD DIARIA (NUEVO)
+# =========================================================================
+elif opcion_hoja == "📅 Productividad Diaria":
+  st.sidebar.header("🔍 Filtros de Fecha General")
+
+  fechas_validas = pd.Series(df_ventas["F_VTA"] if "F_VTA" in df_ventas.columns else []).dropna()
+  años_disp = (sorted(pd.to_datetime(fechas_validas).dt.year.unique()) if not fechas_validas.empty else [date.today().year])
+  año_sel = st.sidebar.selectbox("Año Operativo", años_disp, index=len(años_disp) - 1, key="m3_año_sel")
+
+  meses_disp = (sorted(pd.to_datetime(fechas_validas[pd.to_datetime(fechas_validas).dt.year == año_sel]).dt.month.unique()) if not fechas_validas.empty else [date.today().month])
+  nombres_meses = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
+  mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
+  mes_sel_nombre = (st.sidebar.selectbox("Mes Operativo", mes_formateado, index=len(mes_formateado) - 1, key="m3_mes_sel") if mes_formateado else "Noviembre")
+  mes_sel = list(nombres_meses.keys())[list(nombres_meses.values()).index(mes_sel_nombre)]
+
+  st.title(f"📅 Productividad Diaria del Asesor - {mes_sel_nombre} {año_sel}")
+
+  # Obtener fechas disponibles del mes seleccionado desde Malla Día / Ventas
+  fechas_disponibles_mes = []
+  if not df_malla.empty:
+    col_f_malla = next((c for c in df_malla.columns if str(c).strip().lower() in ["fecha", "f_vta", "date", "n"]), df_malla.columns[13] if len(df_malla.columns) > 13 else None)
+    if col_f_malla:
+      dt_malla = pd.to_datetime(df_malla[col_f_malla], errors='coerce')
+      fechas_disponibles_mes = sorted(dt_malla[(dt_malla.dt.year == año_sel) & (dt_malla.dt.month == mes_sel)].dt.date.dropna().unique().tolist())
+  
+  if not fechas_disponibles_mes and not df_ventas.empty:
+    dt_vta = pd.to_datetime(df_ventas["F_VTA"], errors='coerce')
+    fechas_disponibles_mes = sorted(dt_vta[(dt_vta.dt.year == año_sel) & (dt_vta.dt.month == mes_sel)].dt.date.dropna().unique().tolist())
+
+  if not fechas_disponibles_mes:
+    num_d = calendar.monthrange(año_sel, mes_sel)[1]
+    fechas_disponibles_mes = [date(año_sel, mes_sel, d) for d in range(1, num_d + 1)]
+
+  # -------------------------------------------------------------------------
+  # FILTROS SUPERIORES DEL MÓDULO 3
+  # -------------------------------------------------------------------------
+  st.markdown("##### 🎛️ Filtros de Control Diario")
+  col_m3_f1, col_m3_f2, col_m3_f3 = st.columns(3)
+
+  with col_m3_f1:
+    fecha_filtrada = st.selectbox(
+        "📅 Fecha del Día a Evaluar:",
+        options=fechas_disponibles_mes,
+        index=len(fechas_disponibles_mes) - 1,
+        format_func=lambda d: d.strftime("%d-%b-%Y (%A)"),
+        key="m3_fecha_filter"
+    )
+
+  dia_sel_num = fecha_filtrada.day
+
+  # Supervisores disponibles en el mes
+  def obtener_distribucion_mes_m3(df_dist, anio, mes):
+    if df_dist.empty: return df_dist
+    df_sub = df_dist.copy()
+    col_mes = next((c for c in df_sub.columns if str(c).strip().lower() in ["mes", "month", "mes_num", "num_mes", "periodo"]), None)
+    col_fecha = next((c for c in df_sub.columns if str(c).strip().lower() in ["fecha", "f_vta", "date", "fecha_dist"]), None)
+    if col_fecha:
+      fechas_dt = pd.to_datetime(df_sub[col_fecha], errors='coerce')
+      mask = (fechas_dt.dt.month == mes)
+      col_anio = next((c for c in df_sub.columns if str(c).strip().lower() in ["año", "anio", "year"]), None)
+      if col_anio: mask = mask & (pd.to_numeric(df_sub[col_anio], errors='coerce') == anio)
+      if mask.any(): return df_sub[mask]
+    if col_mes:
+      mask = (pd.to_numeric(df_sub[col_mes], errors='coerce') == mes)
+      if mask.any(): return df_sub[mask]
+    return df_sub
+
+  df_dist_mes_m3 = obtener_distribucion_mes_m3(df_distribucion, año_sel, mes_sel)
+
+  supervisores_set = set()
+  if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
+    supervisores_set.update(df_dist_mes_m3["Supervisor"].dropna().unique())
+  if "Supervisor" in df_ventas.columns:
+    vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]["Supervisor"].dropna().unique()
+    supervisores_set.update(vta_mes_sups)
+
+  supervisores_disp_m3 = ["Todos"] + sorted(list(supervisores_set))
+
+  with col_m3_f2:
+    sup_sel_m3 = st.selectbox("Filtrar por Supervisor:", supervisores_disp_m3, index=0, key="m3_sup_filter")
+
+  df_dist_sub_m3 = df_dist_mes_m3.copy()
+  if sup_sel_m3 != "Todos" and not df_dist_sub_m3.empty and "Supervisor" in df_dist_sub_m3.columns:
+    df_dist_sub_m3 = df_dist_sub_m3[df_dist_sub_m3["Supervisor"] == sup_sel_m3]
+
+  asesores_set_m3 = set()
+  if not df_dist_sub_m3.empty and "agente" in df_dist_sub_m3.columns:
+    asesores_set_m3.update(df_dist_sub_m3["agente"].dropna().unique())
+  if "agente" in df_ventas.columns:
+    vta_mes_agts = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)]
+    if sup_sel_m3 != "Todos" and "Supervisor" in vta_mes_agts.columns:
+      vta_mes_agts = vta_mes_agts[vta_mes_agts["Supervisor"] == sup_sel_m3]
+    asesores_set_m3.update(vta_mes_agts["agente"].dropna().unique())
+
+  asesores_disp_m3 = ["Todos"] + sorted(list(asesores_set_m3))
+
+  with col_m3_f3:
+    asesor_sel_m3 = st.selectbox("Filtrar por Asesor:", asesores_disp_m3, index=0, key="m3_agt_filter")
+
+  # -------------------------------------------------------------------------
+  # MAPEOS Y SUBSETS DE DATOS (MES Y DÍA)
+  # -------------------------------------------------------------------------
+  df_vta_mes_m3 = df_ventas[(pd.to_datetime(df_ventas["F_VTA"]).dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"]).dt.month == mes_sel)].copy() if not df_ventas.empty else pd.DataFrame()
+  df_vta_dia_m3 = df_vta_mes_m3[pd.to_datetime(df_vta_mes_m3["F_VTA"]).dt.date == fecha_filtrada].copy() if not df_vta_mes_m3.empty else pd.DataFrame()
+
+  if not df_malla.empty:
+    col_m_f = next((c for c in df_malla.columns if str(c).strip().lower() in ["fecha", "f_vta", "date", "n"]), df_malla.columns[13] if len(df_malla.columns) > 13 else None)
+    dates_malla = pd.to_datetime(df_malla[col_m_f], errors='coerce') if col_m_f else pd.Series()
+    df_malla_mes_m3 = df_malla[(dates_malla.dt.year == año_sel) & (dates_malla.dt.month == mes_sel)].copy()
+    df_malla_dia_m3 = df_malla_mes_m3[pd.to_datetime(df_malla_mes_m3[col_m_f], errors='coerce').dt.date == fecha_filtrada].copy()
+  else:
+    df_malla_mes_m3 = pd.DataFrame()
+    df_malla_dia_m3 = pd.DataFrame()
+
+  # Mapeo id_per_clean -> Supervisor y Asesor
+  if not df_dist_mes_m3.empty and "id_per_clean" in df_dist_mes_m3.columns:
+    dist_sub_m = df_dist_mes_m3.drop_duplicates(subset=["id_per_clean"]).copy()
+    cols_map_m = ["id_per_clean"]
+    if "Supervisor" in dist_sub_m.columns: cols_map_m.append("Supervisor")
+    if "agente" in dist_sub_m.columns: cols_map_m.append("agente")
+
+    if not df_vta_mes_m3.empty and "id_per_clean"
