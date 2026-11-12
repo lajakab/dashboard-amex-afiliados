@@ -2798,11 +2798,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     else:
         lista_agentes_eval = sorted([str(a).strip() for a in list(asesores_set) if str(a).strip() and str(a).upper() not in ["NAN", "NONE", "-"]])
 
-    # Encontrar las columnas relevantes de ventas
-    col_f_dec = next((c for c in df_ventas.columns if "DEC" in str(c).upper() or "EFF" in str(c).upper()), "F_VTA") if ("df_ventas" in locals() and not df_ventas.empty) else "F_VTA"
-    col_dec_vta = next((c for c in df_ventas.columns if str(c).strip().upper() in ["DECISION", "DECISION_FINAL", "DEC"]), None) if ("df_ventas" in locals() and not df_ventas.empty) else None
-    col_pts_vta = next((c for c in df_ventas.columns if str(c).strip().upper() in ["PUNTOS", "PUNTO"]), None) if ("df_ventas" in locals() and not df_ventas.empty) else None
-
     rows_asesores = []
     
     for agt in lista_agentes_eval:
@@ -2865,7 +2860,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         le_m = float((grp_m["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in grp_m.columns and not grp_m.empty) else 0.0
 
         # ---------------------------------------------------------------------
-        # DÍAS LOG Y DÍAS PROGRAMADOS (FÓRMULAS LET DE EXCEL IMPLEMENTADAS AL 100%)
+        # DÍAS LOG Y DÍAS PROGRAMADOS (Cálculo estricto sobre BL y AU)
         # ---------------------------------------------------------------------
         dias_log = 0.0
         dias_prog = 0.0
@@ -2886,11 +2881,12 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             filt_au = malla_au[coincidencias]
 
             if not filt_val.empty:
-                # Suma de la columna BL
+                # Días programados = suma exacta de BL
                 dias_prog = float(filt_val.sum())
-                # Si AU encuentra 1, debe restar el valor de BL
+                # Días log = suma de BL pero resta (se anula) donde AU es 1
                 resta_log = np.where(filt_au == 1, filt_val, 0.0).sum()
                 dias_log = float(dias_prog - resta_log)
+                if dias_log < 0: dias_log = 0.0
 
         # Fallback de respaldo por ventas registradas si Malla Día no devuelve registros
         if dias_prog == 0.0 and dias_log == 0.0 and not grp_m.empty and "F_VTA" in grp_m.columns:
@@ -2907,34 +2903,55 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         else:
             pct_ausentism = "0.0%"
 
-        # AP Metrics (AP Mes con decisión en el mes + AP Cosecha)
+        # ---------------------------------------------------------------------
+        # AP MES, COSECHA & PUNTOS (LÓGICA BASADA EN EL MÓDULO 2)
+        # ---------------------------------------------------------------------
         df_vta_all_agt = df_ventas[df_ventas["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if ("df_ventas" in locals() and not df_ventas.empty and "agente" in df_ventas.columns) else pd.DataFrame()
         
         ap_m = 0.0
         ap_cos = 0.0
         puntos_base = 0.0
+        grcc_plat = 0
+        rcp_plat = 0
 
         if not df_vta_all_agt.empty:
-            # Máscaras base
+            col_f_dec = next((c for c in df_vta_all_agt.columns if "DEC" in str(c).upper() or "EFF" in str(c).upper()), "F_VTA")
+            col_dec_vta = next((c for c in df_vta_all_agt.columns if str(c).strip().upper() in ["DECISION", "DECISION_FINAL", "DEC"]), None)
+            col_pts_vta = next((c for c in df_vta_all_agt.columns if str(c).strip().upper() in ["PUNTOS", "PUNTO"]), None)
+
+            # Filtro por estado "LEAD EFECTIVO" o decisión "A"
             mask_dec_a = (df_vta_all_agt[col_dec_vta].astype(str).str.strip().str.upper() == "A") if col_dec_vta else (df_vta_all_agt["ESTADO"] == "LEAD EFECTIVO")
+            
             f_dec_series = pd.to_datetime(df_vta_all_agt[col_f_dec], errors="coerce")
             f_vta_series = pd.to_datetime(df_vta_all_agt["F_VTA"], errors="coerce")
             inicio_mes_curr = pd.Timestamp(year=año_sel, month=mes_sel, day=1)
             
-            # Máscara AP Mes y AP Cosecha
+            # AP Mes: Decisión en mes actual Y Venta en mes actual (o futuro)
             mask_ap_m = mask_dec_a & (f_dec_series.dt.year == año_sel) & (f_dec_series.dt.month == mes_sel) & (f_vta_series >= inicio_mes_curr)
+            # AP Cosecha: Decisión en mes actual PERO Venta de un mes anterior
             mask_ap_cos = mask_dec_a & (f_dec_series.dt.year == año_sel) & (f_dec_series.dt.month == mes_sel) & (f_vta_series < inicio_mes_curr)
             
             ap_m = float(mask_ap_m.sum())
             ap_cos = float(mask_ap_cos.sum())
             
-            # Puntos: Extraer suma de columna 'Puntos' real para esas AP Totales
+            # PUNTOS BASE: Se extrae de la columna "Puntos" sobre el total de las AP (Mes + Cosecha)
+            mask_tot_ap = mask_ap_m | mask_ap_cos
             if col_pts_vta:
-                pts_mes_val = pd.to_numeric(df_vta_all_agt.loc[mask_ap_m, col_pts_vta], errors="coerce").fillna(0).sum()
-                pts_cos_val = pd.to_numeric(df_vta_all_agt.loc[mask_ap_cos, col_pts_vta], errors="coerce").fillna(0).sum()
-                puntos_base = float(pts_mes_val + pts_cos_val)
+                puntos_base = float(pd.to_numeric(df_vta_all_agt.loc[mask_tot_ap, col_pts_vta], errors="coerce").fillna(0).sum())
             else:
                 puntos_base = float(ap_m + ap_cos)
+                
+            # TARJETAS PLATINUM: Sólo cuenta sobre la máscara de AP Totales del mes en curso (mask_tot_ap)
+            sub_a_mes = df_vta_all_agt[mask_tot_ap]
+            if not sub_a_mes.empty:
+                card_cols = [c for c in sub_a_mes.columns if any(k in str(c).upper() for k in ["TARJETA", "CARD", "PRODUCTO", "SUBPRODUCTO", "NOMBRE", "TDC", "DESCRIPCION"])]
+                if not card_cols:
+                    card_cols = sub_a_mes.select_dtypes(include=['object', 'string']).columns.tolist()
+                
+                # Consolidar strings de columnas de tarjeta por fila para contar existencias precisas
+                combined_cards = sub_a_mes[card_cols].astype(str).agg(' '.join, axis=1).str.upper()
+                grcc_plat = int((combined_cards.str.contains("GRCC") & combined_cards.str.contains("PLATINUM")).sum())
+                rcp_plat = int((combined_cards.str.contains("RCP") & combined_cards.str.contains("PLATINUM")).sum())
 
         tot_ap = ap_m + ap_cos
         pct_ap_m = (ap_m / le_m) if le_m > 0 else 0.0
@@ -2950,7 +2967,8 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                     calls_d = float(pd.to_numeric(sub_c_d[col_vc], errors="coerce").fillna(0).sum())
 
         if es_activo:
-            llamadas_efec = calls_d if calls_d > 0 else (tram_d * 3.0 if tram_d > 0 else 0.0)
+            # Conv Tram / Llam (Corregido para evitar falsos 33% generados por los fallbacks)
+            llamadas_efec = calls_d 
             conv_tram_llam = float(tram_d / llamadas_efec) if llamadas_efec > 0 else 0.0
             
             costumer_val = "02:15:30"
@@ -2975,32 +2993,9 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             dispo_val = estado_dia
             sph_disp = estado_dia
 
-        # Puntos & Tarjetas Platinum (Cálculo estricto sobre AP con Decisión A en el mes en curso)
-        grcc_plat = 0
-        rcp_plat = 0
-        if not df_vta_all_agt.empty:
-            # Filtro exclusivo: ESTADO = LEAD EFECTIVO y DECISION = A y Mes de Decisión = Mes Seleccionado
-            mask_dec_plat = (df_vta_all_agt["ESTADO"].astype(str).str.upper() == "LEAD EFECTIVO")
-            if col_dec_vta:
-                mask_dec_plat = mask_dec_plat & (df_vta_all_agt[col_dec_vta].astype(str).str.strip().str.upper() == "A")
-            
-            mask_f_dec_plat = (pd.to_datetime(df_vta_all_agt[col_f_dec], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_vta_all_agt[col_f_dec], errors="coerce").dt.month == mes_sel)
-            
-            sub_a_mes = df_vta_all_agt[mask_dec_plat & mask_f_dec_plat]
-            
-            if not sub_a_mes.empty:
-                card_cols = [c for c in sub_a_mes.columns if any(k in str(c).upper() for k in ["TARJETA", "CARD", "PRODUCTO", "SUBPRODUCTO", "NOMBRE", "TDC", "DESCRIPCION"])]
-                if not card_cols:
-                    card_cols = sub_a_mes.select_dtypes(include=['object', 'string']).columns.tolist()
-                
-                for c_col in card_cols:
-                    c_str = sub_a_mes[c_col].astype(str).str.upper()
-                    g_c = (c_str.str.contains("GRCC") & c_str.str.contains("PLATINUM")).sum()
-                    r_c = (c_str.str.contains("RCP") & c_str.str.contains("PLATINUM")).sum()
-                    if g_c > 0 or r_c > 0:
-                        grcc_plat = max(grcc_plat, int(g_c))
-                        rcp_plat = max(rcp_plat, int(r_c))
-
+        # ---------------------------------------------------------------------
+        # PUNTOS ADICIONALES Y COMISIÓN 
+        # ---------------------------------------------------------------------
         pts_add_plat = (grcc_plat - 2) if grcc_plat > 2 else 0
         pts_add_rcp = ((rcp_plat - 1) * 3) if rcp_plat > 1 else 0
         pts_add_tot = pts_add_plat + pts_add_rcp
