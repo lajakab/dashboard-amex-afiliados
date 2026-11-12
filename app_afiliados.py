@@ -2887,7 +2887,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                 "Comisión": "${:,.0f}", "GRCC Platinum": "{:,.0f}", "RCP Platinum": "{:,.0f}",
                 "Puntos Adicionales Platinum": "{:,.0f}", "Puntos Adicionales RCP PLT": "{:,.0f}",
                 "Puntos Adicional": "{:,.0f}", "Puntos totales": "{:,.1f}", "Comis Final": "${:,.0f}"
-            }),
+            }, na_rep="-"),
             use_container_width=True,
             height=450
         )
@@ -2976,7 +2976,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                 "Dias Log": "{:,.1f}", "Prom LE Mes": "{:,.2f}", "% LE Mes": "{:.0%}",
                 "Horas programadas": "{:,.1f}", "%Ausent": "{:.0%}", "AP COSECHA": "{:,.0f}",
                 "AP Mes": "{:,.0f}", "AP Mes + Cosecha": "{:,.0f}", "%AP Mes": "{:.1%}"
-            }),
+            }, na_rep="-"),
             use_container_width=True
         )
 
@@ -3009,15 +3009,15 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         tram_d = len(sub_vd)
         le_d = (sub_vd["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in sub_vd.columns else 0
         rem_rech = sub_vd["ESTADO"].isin(["REMEDIACIÓN", "RECHAZO"]).sum() if "ESTADO" in sub_vd.columns else 0
-        pct_rem_rech = (rem_rech / tram_d) if tram_d > 0 else None
-        pct_le_d = (le_d / tram_d) if tram_d > 0 else None
+        pct_rem_rech = (rem_rech / tram_d) if tram_d > 0 else np.nan
+        pct_le_d = (le_d / tram_d) if tram_d > 0 else np.nan
 
         tram_m = len(sub_vm)
         le_m = (sub_vm["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in sub_vm.columns else 0
-        pct_le_m = (le_m / tram_m) if tram_m > 0 else None
+        pct_le_m = (le_m / tram_m) if tram_m > 0 else np.nan
 
         ap_m = ((sub_vm["ESTADO"] == "LEAD EFECTIVO") & (sub_vm["DECISION"] == "A")).sum() if ("ESTADO" in sub_vm.columns and "DECISION" in sub_vm.columns) else 0
-        pct_ap_m = (ap_m / le_m) if le_m > 0 else None
+        pct_ap_m = (ap_m / le_m) if le_m > 0 else np.nan
 
         val_rows.append({
             "Agente": val,
@@ -3039,13 +3039,13 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             "Agente": "Total",
             "Trámites": df_res_val["Trámites"].sum(),
             "LE dia": df_res_val["LE dia"].sum(),
-            "% REME/RECH": (df_res_val["% REME/RECH"].dropna().mean()) if not df_res_val["% REME/RECH"].dropna().empty else 0.0,
-            "% LE": (df_res_val["LE dia"].sum() / df_res_val["Trámites"].sum()) if df_res_val["Trámites"].sum() > 0 else 0.0,
+            "% REME/RECH": (df_res_val["% REME/RECH"].dropna().mean()) if not df_res_val["% REME/RECH"].dropna().empty else np.nan,
+            "% LE": (df_res_val["LE dia"].sum() / df_res_val["Trámites"].sum()) if df_res_val["Trámites"].sum() > 0 else np.nan,
             "Trámites Mes": df_res_val["Trámites Mes"].sum(),
             "LE Mes": df_res_val["LE Mes"].sum(),
-            "% LE Mes": (df_res_val["LE Mes"].sum() / df_res_val["Trámites Mes"].sum()) if df_res_val["Trámites Mes"].sum() > 0 else 0.0,
+            "% LE Mes": (df_res_val["LE Mes"].sum() / df_res_val["Trámites Mes"].sum()) if df_res_val["Trámites Mes"].sum() > 0 else np.nan,
             "AP Mes": df_res_val["AP Mes"].sum(),
-            "%AP": (df_res_val["AP Mes"].sum() / df_res_val["LE Mes"].sum()) if df_res_val["LE Mes"].sum() > 0 else 0.0
+            "%AP": (df_res_val["AP Mes"].sum() / df_res_val["LE Mes"].sum()) if df_res_val["LE Mes"].sum() > 0 else np.nan
         }
         df_res_val = pd.concat([df_res_val, pd.DataFrame([tot_val])], ignore_index=True)
 
@@ -3054,6 +3054,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                 "Trámites": "{:,.0f}", "LE dia": "{:,.0f}", "% REME/RECH": "{:.0%}",
                 "% LE": "{:.2%}", "Trámites Mes": "{:,.0f}", "LE Mes": "{:,.0f}",
                 "% LE Mes": "{:.0%}", "AP Mes": "{:,.0f}", "%AP": "{:.2%}"
-            }),
+            }, na_rep="-"),
             use_container_width=True
         )
