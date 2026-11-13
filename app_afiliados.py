@@ -2685,14 +2685,12 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             key="m3_fecha_dia_sel"
         )
 
-    # Limpieza robusta de Supervisores para evitar blancos
     df_dist_mes_m3 = df_distribucion.copy() if ("df_distribucion" in locals() and not df_distribucion.empty) else pd.DataFrame()
     if not df_dist_mes_m3.empty:
         col_m_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["mes", "month", "mes_num"]), None)
         if col_m_dist:
             sub_d = df_dist_mes_m3[pd.to_numeric(df_dist_mes_m3[col_m_dist], errors="coerce") == mes_sel]
-            if not sub_d.empty:
-                df_dist_mes_m3 = sub_d
+            if not sub_d.empty: df_dist_mes_m3 = sub_d
 
     supervisores_set = set()
     if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
@@ -2701,6 +2699,10 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)]["Supervisor"].dropna().unique()
         supervisores_set.update([str(s).strip() for s in vta_mes_sups])
 
+    # Buscar en TODO el historico de distribución por si un supervisor (ej: Daniel Rangel) no cruzó bien en el mes
+    if "df_distribucion" in locals() and not df_distribucion.empty and "Supervisor" in df_distribucion.columns:
+        supervisores_set.update([str(s).strip() for s in df_distribucion["Supervisor"].dropna().unique()])
+
     supervisores_disp = ["Todos"] + sorted(list({s for s in supervisores_set if s and s.upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]}))
 
     with c_f2:
@@ -2708,7 +2710,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     df_vta_m3_base = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)].copy() if ("df_ventas" in locals() and not df_ventas.empty) else pd.DataFrame()
     
-    # Limpieza de asignación temporal para el filtro exacto
     if not df_vta_m3_base.empty and "Supervisor" in df_vta_m3_base.columns:
         df_vta_m3_base["Sup_Clean"] = df_vta_m3_base["Supervisor"].astype(str).str.strip()
     
@@ -2764,11 +2765,8 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     rows_asesores = []
     
-    # Identificar columnas maestras para Puntos y Tarjetas
     col_bt_puntos = df_ventas.columns[71] if len(df_ventas.columns) > 71 else None
     col_aw_tipo = df_ventas.columns[48] if len(df_ventas.columns) > 48 else None
-
-    # Malla columnas requeridas
     col_m_user = df_malla_mes.columns[4] if len(df_malla_mes.columns) > 4 else None
     col_m_au = df_malla_mes.columns[46] if len(df_malla_mes.columns) > 46 else None
     col_m_bl = df_malla_mes.columns[63] if len(df_malla_mes.columns) > 63 else None
@@ -2779,19 +2777,21 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         grp_m = df_vta_m3_base[df_vta_m3_base["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_m3_base.empty else pd.DataFrame()
         grp_d = df_vta_dia[df_vta_dia["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_dia.empty else pd.DataFrame()
 
-        # Búsqueda robusta de Supervisor
+        # Búsqueda robusta de Supervisor (Incluso en TODO el archivo de distribución como salvavidas)
         sup_agt = "-"
         if not grp_m.empty and "Supervisor" in grp_m.columns:
             valid_s = [str(s).strip() for s in grp_m["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
             if valid_s: sup_agt = valid_s[0]
             
-        if sup_agt == "-" and not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns and "Supervisor" in df_dist_mes_m3.columns:
-            sub_d_s = df_dist_mes_m3[df_dist_mes_m3["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()]
-            if not sub_d_s.empty:
-                valid_s = [str(s).strip() for s in sub_d_s["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
-                if valid_s: sup_agt = valid_s[0]
+        if sup_agt == "-" and "df_distribucion" in locals() and not df_distribucion.empty:
+            col_agt_d = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
+            col_sup_d = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+            if col_agt_d and col_sup_d:
+                sub_d_s = df_distribucion[df_distribucion[col_agt_d].astype(str).str.strip().str.upper() == str(agt).strip().upper()]
+                if not sub_d_s.empty:
+                    valid_s = [str(s).strip() for s in sub_d_s[col_sup_d].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
+                    if valid_s: sup_agt = valid_s[0]
 
-        # Búsqueda de ID
         id_agt_val = "-"
         if not grp_m.empty and "id_per_clean" in grp_m.columns:
             valid_ids = grp_m["id_per_clean"].dropna().unique()
@@ -2805,7 +2805,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                     valid_ids = sub_d_i[col_i].dropna().unique()
                     if len(valid_ids) > 0: id_agt_val = clean_id_str(valid_ids[0])
 
-        # Estado del Día
         estado_dia = "PROGRAMADO"
         sub_malla_agt_d = pd.DataFrame()
         if not df_malla_dia.empty and col_m_user:
@@ -2835,32 +2834,31 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         tram_m = float(len(grp_m))
         le_m = float((grp_m["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in grp_m.columns and not grp_m.empty) else 0.0
 
-        # Días Prog y Logueados (Cruzando Malla por BL y AU)
+        # Días Prog y Logueados (ACUMULADOS HASTA LA FECHA DE FILTRO)
         dias_prog = 0.0
         dias_log = 0.0
         if not df_malla_mes.empty and col_m_user and col_malla_f_gen:
-            sub_malla_hasta = pd.DataFrame()
-            try:
-                numeric_id = float(id_agt_val)
-                sub_malla_hasta = df_malla_mes[(pd.to_numeric(df_malla_mes[col_m_user], errors="coerce") == numeric_id) & (pd.to_datetime(df_malla_mes[col_malla_f_gen], errors="coerce").dt.day <= fecha_sel_dia.day)]
-            except ValueError:
-                sub_malla_hasta = df_malla_mes[(df_malla_mes[col_m_user].astype(str) == id_agt_val) & (pd.to_datetime(df_malla_mes[col_malla_f_gen], errors="coerce").dt.day <= fecha_sel_dia.day)]
+            mask_date = pd.to_datetime(df_malla_mes[col_malla_f_gen], errors="coerce").dt.date <= fecha_sel_dia
             
-            if sub_malla_hasta.empty and "agente" in df_malla_mes.columns:
-                sub_malla_hasta = df_malla_mes[(df_malla_mes["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()) & (pd.to_datetime(df_malla_mes[col_malla_f_gen], errors="coerce").dt.day <= fecha_sel_dia.day)]
+            mask_agt = pd.Series(False, index=df_malla_mes.index)
+            if id_agt_val != "-":
+                mask_agt = (df_malla_mes[col_m_user].astype(str).str.strip() == id_agt_val) | (pd.to_numeric(df_malla_mes[col_m_user], errors="coerce") == (float(id_agt_val) if id_agt_val.replace('.','',1).isdigit() else -999))
+            
+            if not mask_agt.any() and "agente" in df_malla_mes.columns:
+                mask_agt = (df_malla_mes["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper())
+                
+            sub_malla_hasta = df_malla_mes[mask_date & mask_agt]
                 
             if not sub_malla_hasta.empty and col_m_bl and col_m_au:
                 vals_bl = pd.to_numeric(sub_malla_hasta[col_m_bl], errors="coerce").fillna(0)
                 aus_flags = pd.to_numeric(sub_malla_hasta[col_m_au], errors="coerce").fillna(0)
                 
                 dias_prog = float(vals_bl.sum())
-                # Días Log = Suma BL excluyendo los AU=1
                 dias_log = float(vals_bl[aus_flags != 1].sum())
 
         prom_le_m = (le_m / dias_log) if dias_log > 0 else 0.0
         pct_ausentism = "-" if (dias_prog == 0 or dias_log >= dias_prog) else f"{(1.0 - (dias_log / dias_prog)):.1%}"
 
-        # AP Mes y Cosecha (Ventas)
         inicio_m = date(año_sel, mes_sel, 1)
         ap_m_mask = pd.Series(False, index=grp_m.index)
         if "ESTADO" in grp_m.columns and "DECISION" in grp_m.columns and not grp_m.empty:
@@ -2880,7 +2878,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         tot_ap = ap_m + ap_cos
         pct_ap_m = (ap_m / le_m) if le_m > 0 else 0.0
 
-        # Telefonía
         calls_d = 0.0
         if "df_calls" in locals() and not df_calls.empty:
             col_fc = "F_CALL" if "F_CALL" in df_calls.columns else next((c for c in df_calls.columns if str(c).upper() in ["FECHA", "DATE"]), None)
@@ -2921,7 +2918,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             dispo_val = estado_dia
             sph_disp = estado_dia
 
-        # Puntos (Basado en BT - Puntos Llave) & Tarjetas (Basado en AW)
         puntos_base = 0.0
         grcc_plat = 0
         rcp_plat = 0
@@ -2944,7 +2940,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         pts_add_plat = (grcc_plat - 2) if grcc_plat > 2 else 0
         pts_add_rcp = ((rcp_plat - 1) * 3) if rcp_plat > 1 else 0
         pts_add_tot = pts_add_plat + pts_add_rcp
-
         puntos_totales = puntos_base + pts_add_tot
 
         def calc_comis_cop(pts):
@@ -3006,8 +3001,59 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         }
         df_res_asesores_full = pd.concat([df_res_asesores, pd.DataFrame([tot_row_a])], ignore_index=True)
 
+        def time_to_sec(t_str):
+            if pd.isna(t_str) or not isinstance(t_str, str): return 0
+            parts = str(t_str).split(":")
+            if len(parts) == 3:
+                try: return int(parts[0])*3600 + int(parts[1])*60 + int(parts[2])
+                except: return 0
+            return 0
+
+        def get_color_3pt(val, vmin, vmax, c_low, c_mid, c_high):
+            if vmax == vmin: return ""
+            norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+            if norm <= 0.5:
+                t = norm / 0.5
+                r = int(c_low[0] + t * (c_mid[0] - c_low[0]))
+                g = int(c_low[1] + t * (c_mid[1] - c_low[1]))
+                b = int(c_low[2] + t * (c_mid[2] - c_low[2]))
+            else:
+                t = (norm - 0.5) / 0.5
+                r = int(c_mid[0] + t * (c_high[0] - c_mid[0]))
+                g = int(c_mid[1] + t * (c_high[1] - c_mid[1]))
+                b = int(c_high[2] + t * (c_high[2] - c_mid[2]))
+            return f"background-color: rgb({r},{g},{b}); color: #000000;"
+
+        def get_color_2pt(val, vmin, vmax, c_low, c_high):
+            if vmax == vmin: return ""
+            norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+            r = int(c_low[0] + norm * (c_high[0] - c_low[0]))
+            g = int(c_low[1] + norm * (c_high[1] - c_low[1]))
+            b = int(c_low[2] + norm * (c_high[2] - c_low[2]))
+            return f"background-color: rgb({r},{g},{b}); color: #000000;"
+
         def style_tabla_asesores(df_in):
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
+            df_no_tot = df_in[df_in["Asesor"] != "TOTAL GENERAL"]
+            
+            # Precomputar limites
+            ap_mes_s = pd.to_numeric(df_no_tot["% AP MES"], errors="coerce").dropna()
+            ap_min, ap_max = (ap_mes_s.min(), ap_mes_s.max()) if not ap_mes_s.empty else (0,1)
+            if ap_max == ap_min: ap_max = ap_min + 0.01
+
+            sec_dict = {c: df_no_tot[c].apply(lambda x: time_to_sec(str(x))) for c in ["Costumer", "Pausa", "Dead", "Dispo"] if c in df_no_tot.columns}
+            
+            max_dead = max(sec_dict.get("Dead", pd.Series([0])).max(), 601)
+            max_dispo = max(sec_dict.get("Dispo", pd.Series([0])).max(), 1201)
+            
+            max_pausa = sec_dict.get("Pausa", pd.Series([0])).max()
+            min_pausa = sec_dict.get("Pausa", pd.Series([0])).min()
+            if max_pausa == min_pausa: max_pausa = min_pausa + 1
+            
+            max_costumer = sec_dict.get("Costumer", pd.Series([0])).max()
+            min_costumer = sec_dict.get("Costumer", pd.Series([0])).min()
+            if max_costumer == min_costumer: max_costumer = min_costumer + 1
+
             for idx, row in df_in.iterrows():
                 is_total = (row["Asesor"] == "TOTAL GENERAL")
                 bg_tot = "font-weight: bold; background-color: #f0f2f6;" if is_total else ""
@@ -3023,24 +3069,43 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                                 cell_style += " background-color: #dcfce7; color: #166534;"
                         elif col == "% Cump LE Día":
                             try:
-                                v_c = float(row["% Cump LE Día"])
+                                v_c = float(row[col])
                                 if v_c >= 1.0: cell_style += " background-color: #dcfce7; color: #166534; font-weight: bold;"
                                 elif v_c >= 0.7: cell_style += " background-color: #fef3c7; color: #92400e;"
                                 elif v_c > 0: cell_style += " background-color: #fee2e2; color: #991b1b;"
                             except: pass
                         elif col == "Prom LE Mes":
                             try:
-                                v_p = float(row["Prom LE Mes"])
+                                v_p = float(row[col])
                                 if v_p >= 4.10: cell_style += " background-color: #dcfce7; color: #166534; font-weight: bold;"
                                 elif v_p >= 3.50: cell_style += " background-color: #fef3c7; color: #92400e; font-weight: bold;"
                                 else: cell_style += " background-color: #fee2e2; color: #991b1b; font-weight: bold;"
                             except: pass
                         elif col == "Conv Tram / Llam":
                             try:
-                                v_cv = float(row["Conv Tram / Llam"])
+                                v_cv = float(row[col])
                                 if v_cv >= 0.05: cell_style += " background-color: #dcfce7; color: #166534;"
                                 elif v_cv > 0.02: cell_style += " background-color: #fef3c7; color: #92400e;"
                             except: pass
+                        elif col == "% AP MES":
+                            try:
+                                v_ap = float(row[col])
+                                cell_style += " " + get_color_3pt(v_ap, ap_min, ap_max, (248,140,140), (254,210,120), (162,217,163))
+                            except: pass
+                        elif col == "Costumer":
+                            sec = time_to_sec(row[col])
+                            if sec > 0: cell_style += " " + get_color_3pt(sec, min_costumer, max_costumer, (248,140,140), (254,210,120), (162,217,163))
+                        elif col == "Pausa":
+                            sec = time_to_sec(row[col])
+                            if sec > 0: cell_style += " " + get_color_2pt(sec, min_pausa, max_pausa, (255,255,255), (248,140,140))
+                        elif col == "Dead":
+                            sec = time_to_sec(row[col])
+                            if sec > 600: # Más de 10 min
+                                cell_style += " " + get_color_2pt(sec, 600, max_dead, (252,165,165), (153,27,27)) # Rojo claro a Rojo intenso
+                        elif col == "Dispo":
+                            sec = time_to_sec(row[col])
+                            if sec > 1200: # Más de 20 min
+                                cell_style += " " + get_color_2pt(sec, 1200, max_dispo, (252,165,165), (153,27,27)) # Rojo claro a Rojo intenso
                     styles.loc[idx, col] = cell_style.strip()
             return styles
 
