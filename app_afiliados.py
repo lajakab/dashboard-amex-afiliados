@@ -3818,345 +3818,404 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             )
 # =========================================================================
 # =========================================================================
-# 🧑‍💼 MÓDULO 4: ANÁLISIS SUPERVISOR
+# 🧑‍💼 MÓDULO 4: ANÁLISIS INTEGRAL POR SUPERVISOR
 # =========================================================================
 elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
     st.header("🧑‍💼 Módulo 4: Análisis Integral por Supervisor")
-    st.caption("Consolidado gerencial, matrices operativas, históricos diarios/mensuales y gráficas de evolución, centralizados por Supervisor.")
+    st.caption("Consolidado gerencial, matrices operativas, históricos diarios/mensuales y evolución por Supervisor.")
 
-    # Validar existencia de datos
-    if "df_ventas" not in locals() or df_ventas.empty:
-        st.warning("⚠️ No se encontró el DataFrame `df_ventas` cargado en la aplicación.")
+    # ---------------------------------------------------------------------
+    # Helpers locales. El módulo es autosuficiente y no depende de funciones
+    # declaradas dentro de los elif de los módulos 2 y 3.
+    # ---------------------------------------------------------------------
+    def m4_find_col(df, aliases, contains=False):
+        if df is None or df.empty:
+            return None
+        norm = {str(c).strip().lower(): c for c in df.columns}
+        for a in aliases:
+            if str(a).strip().lower() in norm:
+                return norm[str(a).strip().lower()]
+        if contains:
+            for c in df.columns:
+                lc = str(c).strip().lower()
+                if any(str(a).strip().lower() in lc for a in aliases):
+                    return c
+        return None
+
+    def m4_num(s):
+        return pd.to_numeric(s, errors="coerce").fillna(0)
+
+    def m4_clean_text(s, default="-"):
+        out = s.astype(str).str.strip()
+        return out.replace({"": default, "nan": default, "None": default, "NaT": default})
+
+    def m4_pct(n, d):
+        return float(n) / float(d) if d else 0.0
+
+    def m4_month_name(n):
+        nombres = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        return nombres[int(n)] if 1 <= int(n) <= 12 else str(n)
+
+    def m4_style(df, key="Supervisor"):
+        styles = pd.DataFrame("text-align:center !important;", index=df.index, columns=df.columns)
+        numeric_cols = [c for c in df.columns if c != key]
+        for i, row in df.iterrows():
+            total = str(row.get(key, "")).upper() == "TOTAL OPERACIÓN"
+            if total:
+                styles.loc[i, :] = "text-align:center !important; font-weight:bold; background-color:#e2e8f0; color:#0f172a;"
+                continue
+            for c in numeric_cols:
+                v = row.get(c)
+                try:
+                    x = float(v)
+                except Exception:
+                    continue
+                if "%" in c or c in ["Conversión", "AP Mes", "Cumplimiento LE"]:
+                    if c in ["% No Evaluado", "% Ausentismo"]:
+                        color = "#dcfce7" if x <= .10 else ("#fef3c7" if x <= .20 else "#fee2e2")
+                    else:
+                        color = "#fee2e2" if x < .70 else ("#fef3c7" if x < .90 else "#dcfce7")
+                    styles.loc[i, c] += f" background-color:{color}; font-weight:700;"
+                elif c in ["LE", "LE Día", "Trámites", "Llamadas", "Puntos", "Asesores"]:
+                    styles.loc[i, c] += " background-color:#eff6ff; color:#1d4ed8; font-weight:700;"
+        return styles
+
+    def m4_format_table(df, key="Supervisor"):
+        fm = {}
+        for c in df.columns:
+            if "%" in c or c in ["Conversión", "AP Mes", "Cumplimiento LE"]:
+                fm[c] = "{:.1%}"
+            elif c not in [key, "Mes", "Fecha", "Estado"]:
+                fm[c] = lambda x: f"{x:,.2f}" if isinstance(x, float) and not float(x).is_integer() else (f"{int(x):,}" if isinstance(x, (int, float, np.integer, np.floating)) else x)
+        return df.style.format(fm, na_rep="-").apply(m4_style, key=key, axis=None)
+
+    # ---------------------------------------------------------------------
+    # Preparación robusta de fuentes y enriquecimiento con Supervisor
+    # ---------------------------------------------------------------------
+    v4 = df_ventas.copy() if isinstance(df_ventas, pd.DataFrame) else pd.DataFrame()
+    c4 = df_calls.copy() if isinstance(df_calls, pd.DataFrame) else pd.DataFrame()
+    d4 = df_distribucion.copy() if isinstance(df_distribucion, pd.DataFrame) else pd.DataFrame()
+    m4 = df_malla.copy() if isinstance(df_malla, pd.DataFrame) else pd.DataFrame()
+
+    v_fecha = m4_find_col(v4, ["F_VTA", "fecha", "date"], True)
+    v_id = m4_find_col(v4, ["id_per_clean", "id_per", "id_user", "id"], False)
+    v_sup = m4_find_col(v4, ["Supervisor", "supervisor", "supervisores"], False)
+    v_agent = m4_find_col(v4, ["agente", "asesor", "nombre"], False)
+    v_dec = m4_find_col(v4, ["DECISION", "estado decisión", "status", "estado"], True)
+    v_pts = m4_find_col(v4, ["PUNTOS", "PUNTOS_VTA", "PUNTO_VTA", "PTS", "PUNTO"], False)
+    v_eff = m4_find_col(v4, ["F_DEC_EFF", "fecha decision", "fecha_decision"], True)
+
+    d_id = m4_find_col(d4, ["id_per_clean", "id_per", "id_user", "id"], False)
+    d_sup = m4_find_col(d4, ["Supervisor", "supervisor", "supervisores"], False)
+    d_agent = m4_find_col(d4, ["agente", "asesor", "nombre"], False)
+    d_fecha = m4_find_col(d4, ["fecha_dist", "fecha", "date", "periodo"], True)
+
+    c_fecha = m4_find_col(c4, ["F_CALL", "fecha", "date", "fecha_llamada"], True)
+    c_id = m4_find_col(c4, ["id_per_clean", "id_per", "id_user", "id"], False)
+    c_calls = m4_find_col(c4, ["CALLS", "llamadas_totales", "llamadas", "calls", "val"], True)
+
+    if v_fecha:
+        v4["_fecha"] = pd.to_datetime(v4[v_fecha], errors="coerce")
     else:
-        # Normalizar columnas por seguridad
-        df_vta_m4 = df_ventas.copy()
-        df_vta_m4.columns = [str(c).strip() for c in df_vta_m4.columns]
+        v4["_fecha"] = pd.NaT
+    if c_fecha:
+        c4["_fecha"] = pd.to_datetime(c4[c_fecha], errors="coerce")
+    else:
+        c4["_fecha"] = pd.NaT
+    if d_fecha:
+        d4["_fecha"] = pd.to_datetime(d4[d_fecha], errors="coerce")
 
-        # Detectar columnas clave de forma robusta
-        col_sup = next((c for c in df_vta_m4.columns if c.upper() == "SUPERVISOR"), "Supervisor")
-        col_vta = next((c for c in df_vta_m4.columns if c.upper() in ["F_VTA", "FECHA_VTA", "FECHA"]), "F_VTA")
-        col_est = next((c for c in df_vta_m4.columns if c.upper() == "ESTADO"), "ESTADO")
-        col_dec = next((c for c in df_vta_m4.columns if c.upper() == "DECISION"), "DECISION")
-        col_agt = next((c for c in df_vta_m4.columns if c.upper() in ["AGENTE", "ASESOR", "ASESOR_COMERCIAL"]), "agente")
-        col_fdec = next((c for c in df_vta_m4.columns if c.upper() == "F_DEC_EFF"), "F_DEC_EFF")
+    # Mapa ID -> supervisor/agente; prioriza el último registro disponible.
+    sup_map = pd.DataFrame()
+    if not d4.empty and d_id and d_sup:
+        cols = [d_id, d_sup] + ([d_agent] if d_agent else []) + (["_fecha"] if "_fecha" in d4.columns else [])
+        sup_map = d4[cols].copy()
+        sup_map["_id"] = pd.to_numeric(sup_map[d_id], errors="coerce")
+        sup_map["_sup"] = m4_clean_text(sup_map[d_sup], "Sin Supervisor")
+        sup_map["_agt"] = m4_clean_text(sup_map[d_agent], "Sin Asesor") if d_agent else "Sin Asesor"
+        if "_fecha" in sup_map.columns:
+            sup_map = sup_map.sort_values("_fecha")
+        sup_map = sup_map.dropna(subset=["_id"]).drop_duplicates("_id", keep="last")[["_id", "_sup", "_agt"]]
 
-        # --- 1. FILTROS LATERALES ---
-        st.sidebar.header("🔍 Filtros Módulo 4")
-        
-        # Años disponibles
-        df_vta_m4['temp_dt'] = pd.to_datetime(df_vta_m4[col_vta], errors='coerce')
-        años_disp = sorted(df_vta_m4['temp_dt'].dt.year.dropna().unique().astype(int))
-        if not años_disp: años_disp = [date.today().year]
-        año_sel = st.sidebar.selectbox("Año Operativo", años_disp, index=len(años_disp) - 1, key="m4_año_sel")
+    if v_id:
+        v4["_id"] = pd.to_numeric(v4[v_id], errors="coerce")
+    else:
+        v4["_id"] = np.nan
+    if not sup_map.empty:
+        v4 = v4.merge(sup_map, on="_id", how="left")
+    else:
+        v4["_sup"], v4["_agt"] = np.nan, np.nan
+    if v_sup:
+        v4["Supervisor"] = m4_clean_text(v4[v_sup], "Sin Supervisor")
+        v4["Supervisor"] = v4["_sup"].where(v4["_sup"].notna(), v4["Supervisor"])
+    else:
+        v4["Supervisor"] = v4["_sup"].fillna("Sin Supervisor")
+    if v_agent:
+        v4["Asesor"] = m4_clean_text(v4[v_agent], "Sin Asesor")
+        v4["Asesor"] = v4["_agt"].where(v4["_agt"].notna(), v4["Asesor"])
+    else:
+        v4["Asesor"] = v4["_agt"].fillna("Sin Asesor")
 
-        # Meses disponibles para el año seleccionado
-        df_anio = df_vta_m4[df_vta_m4['temp_dt'].dt.year == año_sel]
-        meses_disp = sorted(df_anio['temp_dt'].dt.month.dropna().unique().astype(int))
-        if not meses_disp: meses_disp = [date.today().month]
-        
-        nombres_meses = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
-        mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
-        mes_sel_nombre = st.sidebar.selectbox("Mes Operativo", mes_formateado, index=len(mes_formateado) - 1, key="m4_mes_sel") if mes_formateado else "Noviembre"
-        mes_sel = {v: k for k, v in nombres_meses.items()}.get(mes_sel_nombre, date.today().month)
+    if c_id:
+        c4["_id"] = pd.to_numeric(c4[c_id], errors="coerce")
+    else:
+        c4["_id"] = np.nan
+    if not sup_map.empty:
+        c4 = c4.merge(sup_map, on="_id", how="left")
+        c4["Supervisor"] = c4["_sup"].fillna("Sin Supervisor")
+        c4["Asesor"] = c4["_agt"].fillna("Sin Asesor")
+    else:
+        c4["Supervisor"], c4["Asesor"] = "Sin Supervisor", "Sin Asesor"
+    c4["_calls"] = m4_num(c4[c_calls]) if c_calls else 0
 
-        # Filtrar por Año y Mes seleccionados
-        df_vta_m4 = df_vta_m4[(df_vta_m4['temp_dt'].dt.year == año_sel) & (df_vta_m4['temp_dt'].dt.month == mes_sel)]
+    # ---------------------------------------------------------------------
+    # Filtros
+    # ---------------------------------------------------------------------
+    fechas = pd.concat([v4["_fecha"], c4["_fecha"]], ignore_index=True).dropna()
+    if fechas.empty:
+        st.error("No existen fechas válidas en Ventas o Llamadas para construir el Módulo 4.")
+        st.stop()
 
-        # Fechas específicas del mes para el histórico diario
-        fechas_mes_disp = sorted(df_vta_m4['temp_dt'].dt.date.dropna().unique())
-        if not fechas_mes_disp: fechas_mes_disp = [date(año_sel, mes_sel, 1)]
-        fecha_sel_dia = st.sidebar.selectbox("📅 Fecha Específica (Para histórico diario):", options=fechas_mes_disp, format_func=lambda d: d.strftime("%Y-%m-%d"), index=len(fechas_mes_disp) - 1, key="m4_fecha_dia_sel")
+    years = sorted(fechas.dt.year.unique().astype(int).tolist(), reverse=True)
+    default_year = years[0]
+    months_for_year = sorted(fechas[fechas.dt.year == default_year].dt.month.unique().astype(int).tolist())
+    default_month = months_for_year[-1] if months_for_year else 1
 
-        # Lista de Supervisores
-        sups_disp = ["Todos"] + sorted([str(s).strip() for s in df_vta_m4[col_sup].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "-", "SIN SUPERVISOR", ""]])
-        sup_sel_m4 = st.sidebar.selectbox("Filtrar Supervisor:", sups_disp, index=0, key="m4_sup_filter")
-        
-        if sup_sel_m4 != "Todos":
-            df_vta_m4 = df_vta_m4[df_vta_m4[col_sup].astype(str).str.strip() == sup_sel_m4]
+    st.sidebar.header("🔎 Filtros Módulo 4")
+    year_sel = st.sidebar.selectbox("Año:", years, index=0, key="m4_year")
+    months = sorted(fechas[fechas.dt.year == year_sel].dt.month.unique().astype(int).tolist())
+    month_sel = st.sidebar.selectbox("Mes:", months, index=max(0, len(months)-1), format_func=m4_month_name, key="m4_month")
 
-        # --- 2. FUNCIONES DE ESTILO Y COLOR ---
-        def m4_color_scale(val, vmin, vmax, c_low, c_mid, c_high):
-            if pd.isna(val) or type(val) == str: return ""
-            if vmax == vmin: return ""
-            norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
-            if norm <= 0.5:
-                t = norm / 0.5; r = int(c_low[0] + t * (c_mid[0] - c_low[0])); g = int(c_low[1] + t * (c_mid[1] - c_low[1])); b = int(c_low[2] + t * (c_mid[2] - c_low[2]))
-            else:
-                t = (norm - 0.5) / 0.5; r = int(c_mid[0] + t * (c_high[0] - c_mid[0])); g = int(c_mid[1] + t * (c_high[1] - c_mid[1])); b = int(c_mid[2] + t * (c_high[2] - c_mid[2]))
-            return f"background-color: rgb({r},{g},{b}); color: #000000;"
+    vm = v4[(v4["_fecha"].dt.year == year_sel) & (v4["_fecha"].dt.month == month_sel)].copy()
+    cm = c4[(c4["_fecha"].dt.year == year_sel) & (c4["_fecha"].dt.month == month_sel)].copy()
+    sups = sorted(set(vm["Supervisor"].dropna().astype(str)) | set(cm["Supervisor"].dropna().astype(str)))
+    sups = [s for s in sups if s.strip() and s.upper() not in ["NAN", "NONE", "-"]]
+    sup_sel = st.sidebar.selectbox("Supervisor:", ["Todos"] + sups, key="m4_supervisor")
 
-        def m4_apply_cond_formatting(df_in):
-            styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
-            df_no_tot = df_in[df_in["Supervisor"] != "TOTAL"] if "Supervisor" in df_in.columns else df_in
-            for col in df_in.columns:
-                if col in ["Supervisor", "Fecha", "Periodo"]:
-                    for idx, row in df_in.iterrows():
-                        styles.loc[idx, col] = "text-align: center; font-weight: bold; background-color: #f0f2f6;" if row.get("Supervisor") == "TOTAL" or row.get("Fecha") == "TOTAL" else "text-align: center;"
-                else:
-                    s = pd.to_numeric(df_no_tot[col], errors="coerce").dropna()
-                    vmin, vmax = (s.min(), s.max()) if not s.empty else (0, 1)
-                    for idx, row in df_in.iterrows():
-                        if row.get("Supervisor") == "TOTAL" or row.get("Fecha") == "TOTAL":
-                            styles.loc[idx, col] = "text-align: center; font-weight: bold; background-color: #f0f2f6;"
-                        else:
-                            val = row[col]
-                            if "No Eval" in col or "Decl" in col:
-                                color = m4_color_scale(val, vmin, vmax, (162,217,163), (254,210,120), (248,140,140))
-                            else:
-                                color = m4_color_scale(val, vmin, vmax, (248,140,140), (254,210,120), (162,217,163))
-                            styles.loc[idx, col] = f"text-align: center; {color}"
-            return styles
+    available_days = sorted(set(vm["_fecha"].dropna().dt.date) | set(cm["_fecha"].dropna().dt.date))
+    day_opts = ["Todos"] + available_days
+    day_sel = st.sidebar.selectbox("Día / fecha:", day_opts, format_func=lambda x: "Todos" if x == "Todos" else x.strftime("%d/%m/%Y"), key="m4_day")
 
-        # --- 3. PROCESAMIENTO GENERAL POR SUPERVISOR ---
-        sup_records = []
-        inicio_mes = pd.Timestamp(date(año_sel, mes_sel, 1))
-        
-        if not df_vta_m4.empty:
-            for sup, grp in df_vta_m4.groupby(col_sup):
-                sup_str = str(sup).strip()
-                if sup_str.upper() in ["NAN", "-", "SIN SUPERVISOR", "", "NONE"]: continue
-                
-                tramites = len(grp)
-                asesores_unicos = grp[col_agt].nunique() if col_agt in grp.columns else 0
-                le_v = (grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").sum() if col_est in grp.columns else 0
-                dec = grp[col_dec].astype(str).str.strip().str.upper() if col_dec in grp.columns else pd.Series("", index=grp.index)
-                
-                f_dec_dt = pd.to_datetime(grp[col_fdec], errors="coerce") if col_fdec in grp.columns else pd.Series(pd.NaT, index=grp.index)
-                ap_m_mask = (grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (f_dec_dt.dt.year == año_sel) & (f_dec_dt.dt.month == mes_sel) & (dec == "A")
-                ap_m = ap_m_mask.sum()
-                
-                # Cosecha
-                df_all = df_ventas.copy()
-                df_all.columns = [str(c).strip() for c in df_all.columns]
-                c_s_all = next((c for c in df_all.columns if c.upper() == "SUPERVISOR"), "Supervisor")
-                c_v_all = next((c for c in df_all.columns if c.upper() in ["F_VTA", "FECHA_VTA", "FECHA"]), "F_VTA")
-                c_d_all = next((c for c in df_all.columns if c.upper() == "DECISION"), "DECISION")
-                c_fd_all = next((c for c in df_all.columns if c.upper() == "F_DEC_EFF"), "F_DEC_EFF")
-                
-                df_cos_sup = df_all[
-                    (df_all[c_s_all].astype(str).str.strip() == sup_str) & 
-                    (pd.to_datetime(df_all[c_fd_all], errors="coerce").dt.year == año_sel) & 
-                    (pd.to_datetime(df_all[c_fd_all], errors="coerce").dt.month == mes_sel) & 
-                    (pd.to_datetime(df_all[c_v_all], errors="coerce") < inicio_mes) & 
-                    (df_all[c_d_all].astype(str).str.strip().str.upper() == "A")
-                ] if c_fd_all in df_all.columns and c_v_all in df_all.columns else pd.DataFrame()
-                
-                ap_cos = len(df_cos_sup)
-                ap_tot = ap_m + ap_cos
-                
-                eval_v = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum() if col_est in grp.columns else 0
-                no_eval_v = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (dec.isin(["-", "NONE", "NAN", "", "NAT"]) | (grp.get("BX_EMPTY", pd.Series(False, index=grp.index))))).sum() if col_est in grp.columns else 0
-                decl_v = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (dec == "D")).sum() if col_est in grp.columns else 0
-                
-                sup_records.append({
-                    "Supervisor": sup_str, "Asesores": asesores_unicos, "Trámites": tramites, "LE": le_v,
-                    "% LE": (le_v / tramites) if tramites > 0 else 0.0, "AP Mes": ap_m, "AP Cosecha": ap_cos, "Total AP": ap_tot,
-                    "% AP": (ap_tot / le_v) if le_v > 0 else 0.0, "Eval": eval_v, "% Eval": (eval_v / le_v) if le_v > 0 else 0.0,
-                    "No Evaluado": no_eval_v, "% No Eval": (no_eval_v / le_v) if le_v > 0 else 0.0, "Declinado": decl_v,
-                    "% Decl": (decl_v / le_v) if le_v > 0 else 0.0
-                })
-                
-        df_sup_matrix = pd.DataFrame(sup_records)
+    if sup_sel != "Todos":
+        vm = vm[vm["Supervisor"].astype(str) == sup_sel]
+        cm = cm[cm["Supervisor"].astype(str) == sup_sel]
+    vmd, cmd = vm.copy(), cm.copy()
+    if day_sel != "Todos":
+        vmd = vmd[vmd["_fecha"].dt.date == day_sel]
+        cmd = cmd[cmd["_fecha"].dt.date == day_sel]
 
-        # --- 4. RENDERIZADO DE PESTAÑAS (TABS) ---
-        t1, t2, t3, t4, t5 = st.tabs([
-            "🗂️ Tarjetas Resumen", 
-            "📊 Matrices Operativas", 
-            "📅 Productividad Diaria", 
-            "📈 Históricos", 
-            "📈 Gráficas de Evolución"
-        ])
+    # Decisiones homologadas.
+    if v_dec:
+        vm["_decision"] = m4_clean_text(vm[v_dec], "NO EVALUADO").str.upper()
+        vmd["_decision"] = m4_clean_text(vmd[v_dec], "NO EVALUADO").str.upper()
+    else:
+        vm["_decision"], vmd["_decision"] = "NO EVALUADO", "NO EVALUADO"
+    vm["_puntos"] = m4_num(vm[v_pts]) if v_pts else 0
+    vmd["_puntos"] = m4_num(vmd[v_pts]) if v_pts else 0
 
-        # ------------------ PESTAÑA 1: TARJETAS EN FILA ------------------
-        with t1:
-            st.subheader(f"Tarjetas Resumen por Supervisor - {mes_sel_nombre} {año_sel}")
-            st.markdown("""
-            <style>
-            .m4-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 25px; align-items: stretch;}
-            .m4-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; flex: 1; min-width: 120px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center; }
-            .m4-title { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
-            .m4-val { font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 2px;}
-            .m4-sub { font-size: 11px; color: #475569; }
-            .m4-sup-header { background: #1e293b; color: white; padding: 6px 12px; border-radius: 5px; margin-bottom: 10px; font-size: 14px; display: inline-block;}
-            </style>
-            """, unsafe_allow_html=True)
-            
-            if not df_sup_matrix.empty:
-                for idx, row in df_sup_matrix.iterrows():
-                    st.markdown(f"<div class='m4-sup-header'>🧑‍💼 {row['Supervisor']} | 👥 Asesores: {row['Asesores']}</div>", unsafe_allow_html=True)
-                    
-                    cards_html = f"""
-                    <div class="m4-container">
-                        <div class="m4-card"><div class="m4-title">Trámites</div><div class="m4-val">{int(row['Trámites']):,}</div></div>
-                        <div class="m4-card"><div class="m4-title">Leads Efectivos</div><div class="m4-val" style="color:#0284c7;">{int(row['LE']):,}</div><div class="m4-sub">Conv: {row['% LE']:.1%}</div></div>
-                        <div class="m4-card"><div class="m4-title">AP Mes / Cosecha</div><div class="m4-val">{int(row['AP Mes'])} / {int(row['AP Cosecha'])}</div><div class="m4-sub">Total AP: {int(row['Total AP'])}</div></div>
-                        <div class="m4-card"><div class="m4-title">% Aprobación</div><div class="m4-val" style="color:#16a34a;">{row['% AP']:.1%}</div><div class="m4-sub">Sobre LE</div></div>
-                        <div class="m4-card"><div class="m4-title">Evaluados</div><div class="m4-val">{int(row['Eval'])}</div><div class="m4-sub">Efec: {row['% Eval']:.1%}</div></div>
-                        <div class="m4-card" style="border-bottom: 3px solid #dc2626;"><div class="m4-title">No Evaluados</div><div class="m4-val" style="color:#dc2626;">{int(row['No Evaluado'])}</div><div class="m4-sub">Riesgo: {row['% No Eval']:.1%}</div></div>
-                    </div>
-                    """
-                    st.markdown(cards_html, unsafe_allow_html=True)
-                
-                st.divider()
-                tot = df_sup_matrix.sum(numeric_only=True)
-                st.markdown(f"#### 🌐 TOTAL OPERACIÓN - {mes_sel_nombre}")
-                tot_html = f"""
-                <div class="m4-container" style="background:#f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #cbd5e1;">
-                    <div class="m4-card"><div class="m4-title">Total LE</div><div class="m4-val">{int(tot['LE']):,}</div></div>
-                    <div class="m4-card"><div class="m4-title">Total AP</div><div class="m4-val" style="color: #16a34a;">{int(tot['Total AP']):,}</div></div>
-                    <div class="m4-card"><div class="m4-title">% Aprobación</div><div class="m4-val">{(tot['Total AP']/tot['LE']):.1%}</div></div>
-                    <div class="m4-card"><div class="m4-title">% No Evaluado</div><div class="m4-val" style="color: #dc2626;">{(tot['No Evaluado']/tot['LE']):.1%}</div></div>
-                </div>
-                """
-                st.markdown(tot_html, unsafe_allow_html=True)
-            else:
-                st.info("No hay datos disponibles para el periodo seleccionado con los filtros actuales.")
+    approved_terms = ["APROB", "APPROV", "ACEPT"]
+    pending_terms = ["PEND", "NO EVALU", "SIN EVALU"]
+    declined_terms = ["DECL", "RECH", "CANCEL", "REM"]
+    def m4_contains(series, terms):
+        pat = "|".join(re.escape(t) for t in terms)
+        return series.astype(str).str.contains(pat, case=False, na=False)
 
-        # ------------------ PESTAÑA 2: MATRICES OPERATIVAS ------------------
-        with t2:
-            if not df_sup_matrix.empty:
-                df_prod = df_sup_matrix[["Supervisor", "Asesores", "Trámites", "LE", "% LE", "AP Mes", "AP Cosecha", "Total AP", "% AP"]].copy()
-                df_conv = df_sup_matrix[["Supervisor", "LE", "Eval", "% Eval", "No Evaluado", "% No Eval", "Declinado", "% Decl"]].copy()
-                
-                tot_p = df_prod.sum(numeric_only=True).to_dict(); tot_p["Supervisor"] = "TOTAL"; tot_p["% LE"] = tot_p["LE"]/tot_p["Trámites"] if tot_p["Trámites"]>0 else 0; tot_p["% AP"] = tot_p["Total AP"]/tot_p["LE"] if tot_p["LE"]>0 else 0
-                df_prod = pd.concat([df_prod, pd.DataFrame([tot_p])], ignore_index=True)
-                
-                tot_c = df_conv.sum(numeric_only=True).to_dict(); tot_c["Supervisor"] = "TOTAL"; tot_c["% Eval"] = tot_c["Eval"]/tot_c["LE"] if tot_c["LE"]>0 else 0; tot_c["% No Eval"] = tot_c["No Evaluado"]/tot_c["LE"] if tot_c["LE"]>0 else 0; tot_c["% Decl"] = tot_c["Declinado"]/tot_c["LE"] if tot_c["LE"]>0 else 0
-                df_conv = pd.concat([df_conv, pd.DataFrame([tot_c])], ignore_index=True)
-                
-                st.markdown("##### 1. Matriz de Productividad Operativa por Supervisor")
-                st.dataframe(df_prod.style.format({"Asesores": "{:.0f}", "Trámites": "{:,.0f}", "LE": "{:,.0f}", "% LE": "{:.1%}", "AP Mes": "{:.0f}", "AP Cosecha": "{:.0f}", "Total AP": "{:.0f}", "% AP": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
-                
-                st.markdown("##### 2. Matriz de Conversión y Efectividad por Supervisor")
-                st.dataframe(df_conv.style.format({"LE": "{:,.0f}", "Eval": "{:.0f}", "% Eval": "{:.1%}", "No Evaluado": "{:.0f}", "% No Eval": "{:.1%}", "Declinado": "{:.0f}", "% Decl": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
-            else:
-                st.info("Sin datos para las matrices operativas.")
+    def m4_summary(vdf, cdf, group="Supervisor"):
+        groups = sorted(set(vdf[group].dropna().astype(str)) | set(cdf[group].dropna().astype(str)))
+        rows = []
+        for g in groups:
+            vv, cc = vdf[vdf[group].astype(str) == g], cdf[cdf[group].astype(str) == g]
+            dec = vv["_decision"] if "_decision" in vv.columns else pd.Series([], dtype=str)
+            le = len(vv)
+            calls = float(cc["_calls"].sum()) if "_calls" in cc.columns else 0
+            ap = int(m4_contains(dec, approved_terms).sum())
+            pend = int(m4_contains(dec, pending_terms).sum())
+            decl = int(m4_contains(dec, declined_terms).sum())
+            evaluated = max(le - pend, 0)
+            advisors = len(set(vv["Asesor"].dropna().astype(str)) | set(cc["Asesor"].dropna().astype(str)))
+            rows.append({
+                group:g, "Asesores":advisors, "LE":le, "Llamadas":calls,
+                "Trámites":evaluated, "AP":ap, "Pendientes":pend, "Decl/Rech/Cancel":decl,
+                "Puntos":float(vv["_puntos"].sum()) if "_puntos" in vv.columns else 0,
+                "Conversión":m4_pct(le, calls), "AP Mes":m4_pct(ap, evaluated),
+                "% No Evaluado":m4_pct(pend, le), "LE por Asesor":m4_pct(le, advisors)
+            })
+        return pd.DataFrame(rows)
 
-        # ------------------ PESTAÑA 3: PRODUCTIVIDAD DIARIA ------------------
-        with t3:
-            st.markdown(f"##### 3. Productividad del Día por Supervisor ({fecha_sel_dia.strftime('%d-%b-%Y')})")
-            df_dia = df_vta_m4[df_vta_m4['temp_dt'].dt.date == fecha_sel_dia]
-            if not df_dia.empty:
-                dia_recs = []
-                for sup, grp in df_dia.groupby(col_sup):
-                    sup_str = str(sup).strip()
-                    if sup_str.upper() in ["NAN", "-", "SIN SUPERVISOR", "", "NONE"]: continue
-                    tram_d = len(grp)
-                    le_d = (grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").sum() if col_est in grp.columns else 0
-                    dec = grp[col_dec].astype(str).str.strip().str.upper() if col_dec in grp.columns else pd.Series("", index=grp.index)
-                    ap_d = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (dec == "A")).sum() if col_est in grp.columns else 0
-                    eval_d = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum() if col_est in grp.columns else 0
-                    
-                    dia_recs.append({
-                        "Supervisor": sup_str, "Trámites Día": tram_d, "LE Día": le_d, "% LE Día": (le_d/tram_d) if tram_d>0 else 0.0,
-                        "AP Día": ap_d, "% AP Día": (ap_d/le_d) if le_d>0 else 0.0, "Eval Día": eval_d, "% Eval Día": (eval_d/le_d) if le_d>0 else 0.0
-                    })
-                df_dia_matrix = pd.DataFrame(dia_recs)
-                if not df_dia_matrix.empty:
-                    tot_d = df_dia_matrix.sum(numeric_only=True).to_dict(); tot_d["Supervisor"] = "TOTAL"; tot_d["% LE Día"] = tot_d["LE Día"]/tot_d["Trámites Día"] if tot_d["Trámites Día"]>0 else 0; tot_d["% AP Día"] = tot_d["AP Día"]/tot_d["LE Día"] if tot_d["LE Día"]>0 else 0; tot_d["% Eval Día"] = tot_d["Eval Día"]/tot_d["LE Día"] if tot_d["LE Día"]>0 else 0
-                    df_dia_matrix = pd.concat([df_dia_matrix, pd.DataFrame([tot_d])], ignore_index=True)
-                    
-                    st.dataframe(df_dia_matrix.style.format({"Trámites Día": "{:,.0f}", "LE Día": "{:,.0f}", "% LE Día": "{:.1%}", "AP Día": "{:.0f}", "% AP Día": "{:.1%}", "Eval Día": "{:.0f}", "% Eval Día": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No hay registros para la fecha seleccionada.")
-            else:
-                st.info(f"No hay registros de ventas para la fecha {fecha_sel_dia}.")
+    resumen = m4_summary(vm, cm)
+    resumen_dia = m4_summary(vmd, cmd)
+    if resumen.empty:
+        st.warning("No se encontraron datos para los filtros seleccionados.")
+        st.stop()
 
-        # ------------------ PESTAÑA 4: HISTÓRICOS ------------------
-        with t4:
-            st.markdown("##### 4. Histórico Diario por Supervisor (Evolución del Mes)")
-            if not df_vta_m4.empty:
-                df_vta_m4['Dia_VTA'] = df_vta_m4['temp_dt'].dt.strftime('%Y-%m-%d')
-                hist_dia_recs = []
-                for (dia, sup), grp in df_vta_m4.groupby(['Dia_VTA', col_sup]):
-                    sup_str = str(sup).strip()
-                    if sup_str.upper() in ["NAN", "-", "SIN SUPERVISOR", "", "NONE"]: continue
-                    tram = len(grp)
-                    le = (grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").sum() if col_est in grp.columns else 0
-                    ap = ((grp[col_est].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (grp[col_dec].astype(str).str.strip().str.upper() == "A")).sum() if col_est in grp.columns and col_dec in grp.columns else 0
-                    hist_dia_recs.append({"Fecha": dia, "Supervisor": sup_str, "Trámites": tram, "LE": le, "AP": ap, "% AP": (ap/le) if le>0 else 0.0})
-                
-                df_hd = pd.DataFrame(hist_dia_recs)
-                if not df_hd.empty:
-                    df_hd = df_hd.sort_values(["Fecha", "Supervisor"])
-                    st.dataframe(df_hd.style.format({"Trámites": "{:,.0f}", "LE": "{:,.0f}", "AP": "{:.0f}", "% AP": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Sin datos para el histórico diario.")
-            
-            st.divider()
-            
-            st.markdown("##### 5. Histórico Mes a Mes por Supervisor (Acumulado Anual)")
-            df_all_hist = df_ventas.copy()
-            df_all_hist.columns = [str(c).strip() for c in df_all_hist.columns]
-            c_v_h = next((c for c in df_all_hist.columns if c.upper() in ["F_VTA", "FECHA_VTA", "FECHA"]), "F_VTA")
-            c_s_h = next((c for c in df_all_hist.columns if c.upper() == "SUPERVISOR"), "Supervisor")
-            c_e_h = next((c for c in df_all_hist.columns if c.upper() == "ESTADO"), "ESTADO")
-            c_d_h = next((c for c in df_all_hist.columns if c.upper() == "DECISION"), "DECISION")
-            c_fd_h = next((c for c in df_all_hist.columns if c.upper() == "F_DEC_EFF"), "F_DEC_EFF")
-            
-            df_all_hist['temp_dt'] = pd.to_datetime(df_all_hist[c_v_h], errors='coerce')
-            meses_historicos = sorted(df_all_hist['temp_dt'].dt.to_period("M").dropna().unique())
-            
-            hist_mes_recs = []
-            for per in meses_historicos:
-                m_y, m_m = per.year, per.month
-                grp_hist = df_all_hist[(df_all_hist['temp_dt'].dt.year == m_y) & (df_all_hist['temp_dt'].dt.month == m_m)]
-                for sup, grp in grp_hist.groupby(c_s_h):
-                    sup_str = str(sup).strip()
-                    if sup_str.upper() in ["NAN", "-", "SIN SUPERVISOR", "", "NONE"]: continue
-                    if sup_sel_m4 != "Todos" and sup_str != sup_sel_m4: continue
-                    
-                    tram = len(grp)
-                    le = (grp[c_e_h].astype(str).str.strip().str.upper() == "LEAD EFECTIVO").sum() if c_e_h in grp.columns else 0
-                    ap = ((grp[c_e_h].astype(str).str.strip().str.upper() == "LEAD EFECTIVO") & (pd.to_datetime(grp[c_fd_h], errors="coerce").dt.year == m_y) & (pd.to_datetime(grp[c_fd_h], errors="coerce").dt.month == m_m) & (grp[c_d_h].astype(str).str.strip().str.upper() == "A")).sum() if c_e_h in grp.columns and c_fd_h in grp.columns and c_d_h in grp.columns else 0
-                    
-                    hist_mes_recs.append({"Periodo": f"{m_y}-{m_m:02d}", "Supervisor": sup_str, "Trámites": tram, "LE": le, "AP Mes": ap, "% AP": (ap/le) if le>0 else 0.0})
-            
-            df_hist_sup = pd.DataFrame(hist_mes_recs)
-            if not df_hist_sup.empty:
-                df_hist_sup = df_hist_sup.sort_values(["Periodo", "Supervisor"])
-                st.dataframe(df_hist_sup.style.format({"Trámites": "{:,.0f}", "LE": "{:,.0f}", "AP Mes": "{:,.0f}", "% AP": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
-            else:
-                st.info("Sin histórico mensual disponible.")
+    total = {
+        "Supervisor":"TOTAL OPERACIÓN", "Asesores":int(resumen["Asesores"].sum()),
+        "LE":int(resumen["LE"].sum()), "Llamadas":float(resumen["Llamadas"].sum()),
+        "Trámites":int(resumen["Trámites"].sum()), "AP":int(resumen["AP"].sum()),
+        "Pendientes":int(resumen["Pendientes"].sum()), "Decl/Rech/Cancel":int(resumen["Decl/Rech/Cancel"].sum()),
+        "Puntos":float(resumen["Puntos"].sum())
+    }
+    total["Conversión"] = m4_pct(total["LE"], total["Llamadas"])
+    total["AP Mes"] = m4_pct(total["AP"], total["Trámites"])
+    total["% No Evaluado"] = m4_pct(total["Pendientes"], total["LE"])
+    total["LE por Asesor"] = m4_pct(total["LE"], total["Asesores"])
 
-        # ------------------ PESTAÑA 5: GRÁFICAS ------------------
-        with t5:
-            st.subheader("📊 Gráficas Estratégicas por Supervisor")
-            if not df_sup_matrix.empty:
-                import plotly.graph_objects as go
-                import plotly.express as px
-                
-                df_chart = df_sup_matrix[df_sup_matrix["Supervisor"] != "TOTAL"].copy()
-                df_chart = df_chart.sort_values(by="LE", ascending=False)
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    fig_vol = go.Figure()
-                    fig_vol.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["LE"], name='Leads Efectivos (LE)', text=df_chart["LE"], textposition='auto', marker_color="#0284c7"))
-                    fig_vol.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["Total AP"], name='Total AP', text=df_chart["Total AP"], textposition='auto', marker_color="#16a34a"))
-                    fig_vol.update_layout(title="Volumen Operativo: LE vs AP (Por Supervisor)", barmode='group', height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_vol, use_container_width=True)
-                
-                with c2:
-                    fig_rates = go.Figure()
-                    fig_rates.add_trace(go.Scatter(x=df_chart["Supervisor"], y=df_chart["% AP"], mode='lines+markers+text', name='% Aprobación', text=[f"{v:.1%}" for v in df_chart["% AP"]], textposition="top center", line=dict(color="#16a34a", width=3, shape='spline')))
-                    fig_rates.add_trace(go.Scatter(x=df_chart["Supervisor"], y=df_chart["% No Eval"], mode='lines+markers+text', name='% No Evaluados', text=[f"{v:.1%}" for v in df_chart["% No Eval"]], textposition="bottom center", line=dict(color="#dc2626", width=3, dash='dot')))
-                    fig_rates.update_layout(title="Indicadores de Calidad: % AP vs Riesgo % No Eval", yaxis_title="Porcentaje", height=400, yaxis=dict(tickformat=".0%"), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_rates, use_container_width=True)
-                    
-                st.divider()
-                
-                c3, c4 = st.columns(2)
-                with c3:
-                    fig_scatter = px.scatter(df_chart, x="Asesores", y="LE", size="Total AP", color="Supervisor", hover_name="Supervisor", title="Relación: Tamaño de Equipo vs Leads Efectivos", labels={"Asesores": "Cantidad de Asesores", "LE": "Leads Efectivos"}, size_max=40)
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                    
-                with c4:
-                    fig_pie = go.Figure()
-                    fig_pie.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["Eval"], name="Evaluados", marker_color="#3b82f6"))
-                    fig_pie.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["No Evaluado"], name="No Evaluados", marker_color="#ef4444"))
-                    fig_pie.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["Declinado"], name="Declinados", marker_color="#f59e0b"))
-                    fig_pie.update_layout(title="Distribución del Estatus de Gestión", barmode='stack', height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("No hay suficientes datos para generar las gráficas.")
+    # ---------------------------------------------------------------------
+    # 1. Tarjetas condensadas por supervisor + total operación
+    # ---------------------------------------------------------------------
+    st.subheader("1. Resumen Ejecutivo por Supervisor")
+    st.caption(f"Periodo: {m4_month_name(month_sel)} {year_sel}" + (f" | Día: {day_sel:%d/%m/%Y}" if day_sel != "Todos" else ""))
+    cards_df = resumen_dia if day_sel != "Todos" and not resumen_dia.empty else resumen
+    for _, r in cards_df.iterrows():
+        st.markdown(f"**{r['Supervisor']}**")
+        cols = st.columns(7)
+        vals = [("Asesores", int(r['Asesores'])), ("LE", int(r['LE'])), ("Llamadas", int(r['Llamadas'])),
+                ("Conversión", f"{r['Conversión']:.1%}"), ("AP Mes", f"{r['AP Mes']:.1%}"),
+                ("No evaluado", f"{r['% No Evaluado']:.1%}"), ("Puntos", f"{r['Puntos']:,.0f}")]
+        for col, (lab, val) in zip(cols, vals):
+            col.metric(lab, val)
+    st.markdown("**TOTAL OPERACIÓN**")
+    tc = st.columns(7)
+    tvals = [("Asesores", total["Asesores"]), ("LE", total["LE"]), ("Llamadas", int(total["Llamadas"])),
+             ("Conversión", f"{total['Conversión']:.1%}"), ("AP Mes", f"{total['AP Mes']:.1%}"),
+             ("No evaluado", f"{total['% No Evaluado']:.1%}"), ("Puntos", f"{total['Puntos']:,.0f}")]
+    for col, (lab, val) in zip(tc, tvals): col.metric(lab, val)
+
+    # ---------------------------------------------------------------------
+    # 2 y 3. Matrices del módulo 2 llevadas a Supervisor
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("2. Matriz de Productividad Operativa por Supervisor")
+    prod_cols = ["Supervisor", "Asesores", "LE", "Llamadas", "LE por Asesor", "Trámites", "Puntos"]
+    prod = pd.concat([resumen[prod_cols], pd.DataFrame([{k: total[k] for k in prod_cols}])], ignore_index=True)
+    st.dataframe(m4_format_table(prod), use_container_width=True, hide_index=True, height=min(560, 38*(len(prod)+1)))
+
+    st.subheader("3. Matriz de Conversión y Efectividad por Supervisor")
+    conv_cols = ["Supervisor", "LE", "Llamadas", "Conversión", "Trámites", "AP", "AP Mes", "Pendientes", "% No Evaluado", "Decl/Rech/Cancel"]
+    conv = pd.concat([resumen[conv_cols], pd.DataFrame([{k: total[k] for k in conv_cols}])], ignore_index=True)
+    st.dataframe(m4_format_table(conv), use_container_width=True, hide_index=True, height=min(560, 38*(len(conv)+1)))
+
+    # ---------------------------------------------------------------------
+    # 4. Histórico consolidado mensual por Supervisor
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("4. Histórico Consolidado por Supervisor (Evolución Mes a Mes)")
+    hist_sup = st.selectbox("Supervisor para histórico:", sups, index=(sups.index(sup_sel) if sup_sel in sups else 0), key="m4_hist_sup") if sups else None
+    hist_rows = []
+    if hist_sup:
+        periods = sorted(set(zip(v4["_fecha"].dropna().dt.year, v4["_fecha"].dropna().dt.month)))
+        for yy, mm in periods:
+            hv = v4[(v4["Supervisor"].astype(str)==hist_sup) & (v4["_fecha"].dt.year==yy) & (v4["_fecha"].dt.month==mm)].copy()
+            hc = c4[(c4["Supervisor"].astype(str)==hist_sup) & (c4["_fecha"].dt.year==yy) & (c4["_fecha"].dt.month==mm)].copy()
+            if hv.empty and hc.empty: continue
+            hv["_decision"] = m4_clean_text(hv[v_dec], "NO EVALUADO").str.upper() if v_dec else "NO EVALUADO"
+            hv["_puntos"] = m4_num(hv[v_pts]) if v_pts else 0
+            rr = m4_summary(hv, hc)
+            if not rr.empty:
+                z=rr.iloc[0].to_dict(); z["Mes"]=f"{m4_month_name(mm)} {yy}"; z["_ord"]=int(yy)*100+int(mm); hist_rows.append(z)
+        hist = pd.DataFrame(hist_rows).sort_values("_ord") if hist_rows else pd.DataFrame()
+        if not hist.empty:
+            show = hist[["Mes","Asesores","LE","Llamadas","Conversión","AP Mes","% No Evaluado","Puntos"]]
+            st.dataframe(m4_format_table(show, key="Mes"), use_container_width=True, hide_index=True)
+
+    # ---------------------------------------------------------------------
+    # 5. Productividad por Supervisor para el día seleccionado
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("5. Productividad del Día por Supervisor")
+    fecha_prod = day_sel if day_sel != "Todos" else max(available_days)
+    vd = vm[vm["_fecha"].dt.date == fecha_prod].copy()
+    cd = cm[cm["_fecha"].dt.date == fecha_prod].copy()
+    vd["_decision"] = m4_clean_text(vd[v_dec], "NO EVALUADO").str.upper() if v_dec else "NO EVALUADO"
+    vd["_puntos"] = m4_num(vd[v_pts]) if v_pts else 0
+    daily = m4_summary(vd, cd)
+    st.caption(f"Fecha analizada: {fecha_prod:%d/%m/%Y}")
+    if not daily.empty:
+        st.dataframe(m4_format_table(daily), use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay actividad registrada para la fecha seleccionada.")
+
+    # ---------------------------------------------------------------------
+    # 6. Histórico diario por Supervisor
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("6. Histórico Diario por Supervisor")
+    daily_rows=[]
+    for dd in sorted(set(vm["_fecha"].dropna().dt.date) | set(cm["_fecha"].dropna().dt.date)):
+        hv=vm[vm["_fecha"].dt.date==dd].copy(); hc=cm[cm["_fecha"].dt.date==dd].copy()
+        hv["_decision"] = m4_clean_text(hv[v_dec], "NO EVALUADO").str.upper() if v_dec else "NO EVALUADO"
+        hv["_puntos"] = m4_num(hv[v_pts]) if v_pts else 0
+        rr=m4_summary(hv,hc)
+        for _,z in rr.iterrows():
+            q=z.to_dict(); q["Fecha"]=pd.Timestamp(dd); daily_rows.append(q)
+    daily_hist=pd.DataFrame(daily_rows)
+    if not daily_hist.empty:
+        daily_show=daily_hist[["Fecha","Supervisor","Asesores","LE","Llamadas","Conversión","AP Mes","% No Evaluado","Puntos"]].sort_values(["Fecha","Supervisor"], ascending=[False,True])
+        st.dataframe(m4_format_table(daily_show, key="Fecha"), use_container_width=True, hide_index=True, height=520)
+
+    # ---------------------------------------------------------------------
+    # 7. Productividad mes a mes por Supervisor
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("7. Productividad Mes a Mes por Supervisor")
+    month_rows=[]
+    periods=sorted(set(zip(v4["_fecha"].dropna().dt.year, v4["_fecha"].dropna().dt.month)), reverse=True)
+    for yy,mm in periods:
+        hv=v4[(v4["_fecha"].dt.year==yy)&(v4["_fecha"].dt.month==mm)].copy()
+        hc=c4[(c4["_fecha"].dt.year==yy)&(c4["_fecha"].dt.month==mm)].copy()
+        if sup_sel!="Todos": hv=hv[hv["Supervisor"].astype(str)==sup_sel]; hc=hc[hc["Supervisor"].astype(str)==sup_sel]
+        hv["_decision"] = m4_clean_text(hv[v_dec], "NO EVALUADO").str.upper() if v_dec else "NO EVALUADO"
+        hv["_puntos"] = m4_num(hv[v_pts]) if v_pts else 0
+        rr=m4_summary(hv,hc)
+        for _,z in rr.iterrows():
+            q=z.to_dict(); q["Mes"]=f"{m4_month_name(mm)} {yy}"; q["_ord"]=yy*100+mm; month_rows.append(q)
+    monthly=pd.DataFrame(month_rows)
+    if not monthly.empty:
+        monthly_show=monthly.sort_values(["_ord","Supervisor"],ascending=[False,True])[["Mes","Supervisor","Asesores","LE","Llamadas","Conversión","AP Mes","% No Evaluado","Puntos"]]
+        st.dataframe(m4_format_table(monthly_show, key="Mes"), use_container_width=True, hide_index=True, height=520)
+
+    # ---------------------------------------------------------------------
+    # 8. Gráficas ejecutivas
+    # ---------------------------------------------------------------------
+    st.divider()
+    st.subheader("8. Evolución y Cumplimiento por Supervisor")
+    g1,g2=st.columns(2)
+    with g1:
+        fig=go.Figure()
+        fig.add_bar(x=resumen["Supervisor"], y=resumen["LE"], name="LE", marker_color="#2563eb")
+        fig.add_scatter(x=resumen["Supervisor"], y=resumen["Conversión"], name="Conversión", mode="lines+markers", yaxis="y2", line=dict(color="#f59e0b",width=3))
+        fig.update_layout(title="LE y Conversión", yaxis=dict(title="LE"), yaxis2=dict(title="Conversión",overlaying="y",side="right",tickformat=".0%"), legend=dict(orientation="h"), height=420)
+        st.plotly_chart(fig,use_container_width=True)
+    with g2:
+        fig=go.Figure()
+        fig.add_bar(x=resumen["Supervisor"], y=resumen["AP Mes"], name="AP Mes", marker_color="#16a34a")
+        fig.add_bar(x=resumen["Supervisor"], y=resumen["% No Evaluado"], name="% No Evaluado", marker_color="#dc2626")
+        fig.update_layout(title="AP Mes vs. No Evaluado", barmode="group", yaxis_tickformat=".0%", height=420, legend=dict(orientation="h"))
+        st.plotly_chart(fig,use_container_width=True)
+
+    if not daily_hist.empty:
+        chart_sup = hist_sup or resumen.iloc[0]["Supervisor"]
+        evo=daily_hist[daily_hist["Supervisor"].astype(str)==str(chart_sup)].sort_values("Fecha")
+        if not evo.empty:
+            fig=go.Figure()
+            fig.add_scatter(x=evo["Fecha"],y=evo["LE"],mode="lines+markers",name="LE",line=dict(color="#2563eb"))
+            fig.add_scatter(x=evo["Fecha"],y=evo["AP Mes"],mode="lines+markers",name="AP Mes",yaxis="y2",line=dict(color="#16a34a"))
+            fig.add_scatter(x=evo["Fecha"],y=evo["% No Evaluado"],mode="lines+markers",name="No evaluado",yaxis="y2",line=dict(color="#dc2626"))
+            fig.update_layout(title=f"Evolución diaria: {chart_sup}",yaxis=dict(title="LE"),yaxis2=dict(title="Porcentaje",overlaying="y",side="right",tickformat=".0%"),height=430,legend=dict(orientation="h"))
+            st.plotly_chart(fig,use_container_width=True)
+
+    # Asesores dentro/fuera del objetivo usando media del equipo como referencia operativa.
+    st.subheader("9. Asesores dentro y fuera del objetivo")
+    advisor = m4_summary(vm.rename(columns={"Asesor":"_Asesor"}), cm.rename(columns={"Asesor":"_Asesor"}), group="_Asesor") if "Asesor" in vm.columns and "Asesor" in cm.columns else pd.DataFrame()
+    if not advisor.empty:
+        advisor=advisor.rename(columns={"_Asesor":"Asesor"})
+        target_le=float(advisor["LE"].mean())
+        target_ap=float(advisor["AP Mes"].mean())
+        advisor["Cumple objetivo"]=(advisor["LE"]>=target_le)&(advisor["AP Mes"]>=target_ap)
+        inside=int(advisor["Cumple objetivo"].sum()); outside=int((~advisor["Cumple objetivo"]).sum())
+        a,b,c=st.columns(3); a.metric("Dentro del objetivo",inside); b.metric("Fuera del objetivo",outside); c.metric("Total asesores",len(advisor))
+        st.caption(f"Referencia dinámica del periodo: LE ≥ {target_le:.1f} y AP Mes ≥ {target_ap:.1%}. Esta referencia evita inventar una meta no presente en las fuentes.")
+        fig=go.Figure(go.Pie(labels=["Dentro","Fuera"],values=[inside,outside],hole=.55,marker_colors=["#16a34a","#dc2626"]))
+        fig.update_layout(height=350,title="Distribución de cumplimiento")
+        st.plotly_chart(fig,use_container_width=True)
