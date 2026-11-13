@@ -2645,7 +2645,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     fechas_validas_vta = pd.Series(df_ventas["F_VTA"] if ("df_ventas" in locals() and not df_ventas.empty and "F_VTA" in df_ventas.columns) else []).dropna()
     
-    # Identificar columna N (índice 13) para fechas de Malla
     col_malla_f_gen = df_malla.columns[13] if ("df_malla" in locals() and not df_malla.empty and len(df_malla.columns) > 13) else (df_malla.columns[0] if "df_malla" in locals() and not df_malla.empty else "Fecha")
     
     if "df_malla" in locals() and not df_malla.empty:
@@ -2668,7 +2667,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     mes_sel_nombre = st.sidebar.selectbox("Mes Operativo", mes_formateado, index=len(mes_formateado) - 1, key="m3_mes_sel") if mes_formateado else "Noviembre"
     mes_sel = inv_nombres_meses.get(mes_sel_nombre, date.today().month)
 
-    # Fechas disponibles dentro del mes
     fechas_mes_disp = sorted(pd.to_datetime(all_fechas[(pd.to_datetime(all_fechas, errors="coerce").dt.year == año_sel) & (pd.to_datetime(all_fechas, errors="coerce").dt.month == mes_sel)], errors="coerce").dt.date.unique())
     if not fechas_mes_disp:
         fechas_mes_disp = [date(año_sel, mes_sel, 1)]
@@ -2685,6 +2683,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             key="m3_fecha_dia_sel"
         )
 
+    # Preparar Distribución del mes actual
     df_dist_mes_m3 = df_distribucion.copy() if ("df_distribucion" in locals() and not df_distribucion.empty) else pd.DataFrame()
     if not df_dist_mes_m3.empty:
         col_m_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["mes", "month", "mes_num"]), None)
@@ -2692,14 +2691,13 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             sub_d = df_dist_mes_m3[pd.to_numeric(df_dist_mes_m3[col_m_dist], errors="coerce") == mes_sel]
             if not sub_d.empty: df_dist_mes_m3 = sub_d
 
+    # Construir lista de supervisores reales evaluando Distribución y Ventas
     supervisores_set = set()
     if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
         supervisores_set.update([str(s).strip() for s in df_dist_mes_m3["Supervisor"].dropna().unique()])
     if "df_ventas" in locals() and not df_ventas.empty and "Supervisor" in df_ventas.columns:
         vta_mes_sups = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)]["Supervisor"].dropna().unique()
         supervisores_set.update([str(s).strip() for s in vta_mes_sups])
-
-    # Buscar en TODO el historico de distribución por si un supervisor (ej: Daniel Rangel) no cruzó bien en el mes
     if "df_distribucion" in locals() and not df_distribucion.empty and "Supervisor" in df_distribucion.columns:
         supervisores_set.update([str(s).strip() for s in df_distribucion["Supervisor"].dropna().unique()])
 
@@ -2710,20 +2708,19 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     df_vta_m3_base = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)].copy() if ("df_ventas" in locals() and not df_ventas.empty) else pd.DataFrame()
     
-    if not df_vta_m3_base.empty and "Supervisor" in df_vta_m3_base.columns:
-        df_vta_m3_base["Sup_Clean"] = df_vta_m3_base["Supervisor"].astype(str).str.strip()
-    
-    if sup_sel_m3 != "Todos" and not df_vta_m3_base.empty and "Sup_Clean" in df_vta_m3_base.columns:
-        df_vta_m3_base = df_vta_m3_base[df_vta_m3_base["Sup_Clean"] == sup_sel_m3]
-
+    # Construir set de asesores SIN filtrar df_vta_m3_base, para no perder ventas si tenían un supervisor incorrecto
     asesores_set = set()
-    if not df_vta_m3_base.empty and "agente" in df_vta_m3_base.columns:
-        asesores_set.update(df_vta_m3_base["agente"].dropna().unique())
-    if not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns:
-        if sup_sel_m3 != "Todos" and "Supervisor" in df_dist_mes_m3.columns:
+    if sup_sel_m3 != "Todos":
+        if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
             sub_d = df_dist_mes_m3[df_dist_mes_m3["Supervisor"].astype(str).str.strip() == sup_sel_m3]
             asesores_set.update(sub_d["agente"].dropna().unique())
-        else:
+        if not df_vta_m3_base.empty and "Supervisor" in df_vta_m3_base.columns:
+            sub_v = df_vta_m3_base[df_vta_m3_base["Supervisor"].astype(str).str.strip() == sup_sel_m3]
+            asesores_set.update(sub_v["agente"].dropna().unique())
+    else:
+        if not df_vta_m3_base.empty and "agente" in df_vta_m3_base.columns:
+            asesores_set.update(df_vta_m3_base["agente"].dropna().unique())
+        if not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns:
             asesores_set.update(df_dist_mes_m3["agente"].dropna().unique())
 
     asesores_disp = ["Todos"] + sorted([str(a).strip() for a in list(asesores_set) if str(a).strip() and str(a).upper() not in ["NAN", "NONE", "-"]])
@@ -2777,21 +2774,9 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         grp_m = df_vta_m3_base[df_vta_m3_base["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_m3_base.empty else pd.DataFrame()
         grp_d = df_vta_dia[df_vta_dia["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_dia.empty else pd.DataFrame()
 
-        # Búsqueda robusta de Supervisor (Incluso en TODO el archivo de distribución como salvavidas)
-        sup_agt = "-"
-        if not grp_m.empty and "Supervisor" in grp_m.columns:
-            valid_s = [str(s).strip() for s in grp_m["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
-            if valid_s: sup_agt = valid_s[0]
-            
-        if sup_agt == "-" and "df_distribucion" in locals() and not df_distribucion.empty:
-            col_agt_d = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["agente", "asesor", "nombre"]), None)
-            col_sup_d = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
-            if col_agt_d and col_sup_d:
-                sub_d_s = df_distribucion[df_distribucion[col_agt_d].astype(str).str.strip().str.upper() == str(agt).strip().upper()]
-                if not sub_d_s.empty:
-                    valid_s = [str(s).strip() for s in sub_d_s[col_sup_d].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
-                    if valid_s: sup_agt = valid_s[0]
-
+        # -------------------------------------------------------------
+        # 🔍 PASO 1: EXTRAER EL ID EXACTO DEL AGENTE PRIMERO
+        # -------------------------------------------------------------
         id_agt_val = "-"
         if not grp_m.empty and "id_per_clean" in grp_m.columns:
             valid_ids = grp_m["id_per_clean"].dropna().unique()
@@ -2804,6 +2789,56 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                 if col_i:
                     valid_ids = sub_d_i[col_i].dropna().unique()
                     if len(valid_ids) > 0: id_agt_val = clean_id_str(valid_ids[0])
+
+        # -------------------------------------------------------------
+        # 👥 PASO 2: BUSCAR SUPERVISOR ESTRICTAMENTE POR ID
+        # -------------------------------------------------------------
+        sup_agt = "-"
+        
+        # A) Buscar por ID en Distribución del MES ACTUAL (Máxima Fiabilidad)
+        if id_agt_val != "-" and not df_dist_mes_m3.empty:
+            col_id_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
+            col_sup_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+            
+            if col_id_dist and col_sup_dist:
+                sub_d_s = df_dist_mes_m3[
+                    (df_dist_mes_m3[col_id_dist].astype(str).str.strip() == id_agt_val) |
+                    (pd.to_numeric(df_dist_mes_m3[col_id_dist], errors="coerce") == (float(id_agt_val) if id_agt_val.replace('.','',1).isdigit() else -999))
+                ]
+                if not sub_d_s.empty:
+                    valid_s = [str(s).strip() for s in sub_d_s[col_sup_dist].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
+                    if valid_s: sup_agt = valid_s[0]
+
+        # B) Buscar por NOMBRE en Distribución del MES ACTUAL (Si no cruzó por ID)
+        if sup_agt == "-" and not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns:
+            col_sup_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+            if col_sup_dist:
+                sub_d_s = df_dist_mes_m3[df_dist_mes_m3["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()]
+                if not sub_d_s.empty:
+                    valid_s = [str(s).strip() for s in sub_d_s[col_sup_dist].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
+                    if valid_s: sup_agt = valid_s[0]
+
+        # C) Buscar en Todo el histórico de Distribución por ID
+        if sup_agt == "-" and id_agt_val != "-" and "df_distribucion" in locals() and not df_distribucion.empty:
+            col_id_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
+            col_sup_dist = next((c for c in df_distribucion.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
+            if col_id_dist and col_sup_dist:
+                sub_d_s = df_distribucion[
+                    (df_distribucion[col_id_dist].astype(str).str.strip() == id_agt_val) |
+                    (pd.to_numeric(df_distribucion[col_id_dist], errors="coerce") == (float(id_agt_val) if id_agt_val.replace('.','',1).isdigit() else -999))
+                ]
+                if not sub_d_s.empty:
+                    valid_s = [str(s).strip() for s in sub_d_s[col_sup_dist].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
+                    if valid_s: sup_agt = valid_s[-1] 
+
+        # D) Último recurso: Dejar el de Ventas
+        if sup_agt == "-" and not grp_m.empty and "Supervisor" in grp_m.columns:
+            valid_s = [str(s).strip() for s in grp_m["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
+            if valid_s: sup_agt = valid_s[0]
+
+        # Aplicar el filtro de supervisor si el usuario seleccionó uno
+        if sup_sel_m3 != "Todos" and sup_agt != sup_sel_m3:
+            continue
 
         estado_dia = "PROGRAMADO"
         sub_malla_agt_d = pd.DataFrame()
@@ -3036,7 +3071,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
             df_no_tot = df_in[df_in["Asesor"] != "TOTAL GENERAL"]
             
-            # Precomputar limites
             ap_mes_s = pd.to_numeric(df_no_tot["% AP MES"], errors="coerce").dropna()
             ap_min, ap_max = (ap_mes_s.min(), ap_mes_s.max()) if not ap_mes_s.empty else (0,1)
             if ap_max == ap_min: ap_max = ap_min + 0.01
