@@ -2683,7 +2683,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             key="m3_fecha_dia_sel"
         )
 
-    # Preparar Distribución ESTRICTAMENTE del mes actual (soporta texto "Noviembre" o número 11)
+    # Preparar Distribución ESTRICTAMENTE del mes actual
     df_dist_mes_m3 = df_distribucion.copy() if ("df_distribucion" in locals() and not df_distribucion.empty) else pd.DataFrame()
     if not df_dist_mes_m3.empty:
         col_m_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["mes", "month", "mes_num"]), None)
@@ -2694,9 +2694,9 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             if not sub_d.empty:
                 df_dist_mes_m3 = sub_d
             else:
-                df_dist_mes_m3 = pd.DataFrame(columns=df_dist_mes_m3.columns) # Vacío si no hay de ese mes
+                df_dist_mes_m3 = pd.DataFrame(columns=df_dist_mes_m3.columns)
 
-    # Construir lista de supervisores reales evaluando solo el mes seleccionado
+    # Construir lista de supervisores reales
     supervisores_set = set()
     if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
         supervisores_set.update([str(s).strip() for s in df_dist_mes_m3["Supervisor"].dropna().unique()])
@@ -2711,7 +2711,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
     df_vta_m3_base = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)].copy() if ("df_ventas" in locals() and not df_ventas.empty) else pd.DataFrame()
     
-    # Construir set de asesores SIN filtrar df_vta_m3_base, para no perder ventas si tenían un supervisor incorrecto
     asesores_set = set()
     if sup_sel_m3 != "Todos":
         if not df_dist_mes_m3.empty and "Supervisor" in df_dist_mes_m3.columns:
@@ -2732,6 +2731,40 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         asesor_sel_m3 = st.selectbox("Asesor:", asesores_disp, index=0, key="m3_agt_filter")
 
     st.markdown("---")
+
+    # =========================================================================
+    # FUNCIONES GENERALES DE COLORES
+    # =========================================================================
+    def time_to_sec(t_str):
+        if pd.isna(t_str) or not isinstance(t_str, str): return 0
+        parts = str(t_str).split(":")
+        if len(parts) == 3:
+            try: return int(parts[0])*3600 + int(parts[1])*60 + int(parts[2])
+            except: return 0
+        return 0
+
+    def get_color_3pt(val, vmin, vmax, c_low, c_mid, c_high):
+        if vmax == vmin: return ""
+        norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+        if norm <= 0.5:
+            t = norm / 0.5
+            r = int(c_low[0] + t * (c_mid[0] - c_low[0]))
+            g = int(c_low[1] + t * (c_mid[1] - c_low[1]))
+            b = int(c_low[2] + t * (c_mid[2] - c_low[2]))
+        else:
+            t = (norm - 0.5) / 0.5
+            r = int(c_mid[0] + t * (c_high[0] - c_mid[0]))
+            g = int(c_mid[1] + t * (c_high[1] - c_mid[1]))
+            b = int(c_high[2] + t * (c_high[2] - c_mid[2]))
+        return f"background-color: rgb({r},{g},{b}); color: #000000;"
+
+    def get_color_2pt(val, vmin, vmax, c_low, c_high):
+        if vmax == vmin: return ""
+        norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+        r = int(c_low[0] + norm * (c_high[0] - c_low[0]))
+        g = int(c_low[1] + norm * (c_high[1] - c_low[1]))
+        b = int(c_low[2] + norm * (c_high[2] - c_low[2]))
+        return f"background-color: rgb({r},{g},{b}); color: #000000;"
 
     # -------------------------------------------------------------------------
     # TABLA 1: PRODUCTIVIDAD DEL DÍA DEL ASESOR
@@ -2777,9 +2810,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         grp_m = df_vta_m3_base[df_vta_m3_base["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_m3_base.empty else pd.DataFrame()
         grp_d = df_vta_dia[df_vta_dia["agente"].astype(str).str.strip().str.upper() == str(agt).strip().upper()] if not df_vta_dia.empty else pd.DataFrame()
 
-        # -------------------------------------------------------------
-        # 🔍 PASO 1: EXTRAER EL ID EXACTO DEL AGENTE PRIMERO
-        # -------------------------------------------------------------
         id_agt_val = "-"
         if not grp_m.empty and "id_per_clean" in grp_m.columns:
             valid_ids = grp_m["id_per_clean"].dropna().unique()
@@ -2793,12 +2823,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                     valid_ids = sub_d_i[col_i].dropna().unique()
                     if len(valid_ids) > 0: id_agt_val = clean_id_str(valid_ids[0])
 
-        # -------------------------------------------------------------
-        # 👥 PASO 2: BUSCAR SUPERVISOR ESTRICTAMENTE POR ID (MES ACTUAL)
-        # -------------------------------------------------------------
         sup_agt = "-"
-        
-        # A) Buscar por ID en Distribución del MES ACTUAL
         if id_agt_val != "-" and not df_dist_mes_m3.empty:
             col_id_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["id_per", "id_user", "id"]), None)
             col_sup_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
@@ -2812,7 +2837,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                     valid_s = [str(s).strip() for s in sub_d_s[col_sup_dist].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
                     if valid_s: sup_agt = valid_s[0]
 
-        # B) Buscar por NOMBRE en Distribución del MES ACTUAL (Si no cruzó por ID)
         if sup_agt == "-" and not df_dist_mes_m3.empty and "agente" in df_dist_mes_m3.columns:
             col_sup_dist = next((c for c in df_dist_mes_m3.columns if str(c).strip().lower() in ["supervisor", "supervisores"]), None)
             if col_sup_dist:
@@ -2821,12 +2845,10 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                     valid_s = [str(s).strip() for s in sub_d_s[col_sup_dist].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
                     if valid_s: sup_agt = valid_s[0]
 
-        # C) Último recurso: Dejar el de Ventas del MES ACTUAL
         if sup_agt == "-" and not grp_m.empty and "Supervisor" in grp_m.columns:
             valid_s = [str(s).strip() for s in grp_m["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "NONE", "-", "SIN SUPERVISOR"]]
             if valid_s: sup_agt = valid_s[0]
 
-        # Aplicar el filtro de supervisor si el usuario seleccionó uno
         if sup_sel_m3 != "Todos" and sup_agt != sup_sel_m3:
             continue
 
@@ -2859,7 +2881,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         tram_m = float(len(grp_m))
         le_m = float((grp_m["ESTADO"] == "LEAD EFECTIVO").sum()) if ("ESTADO" in grp_m.columns and not grp_m.empty) else 0.0
 
-        # Días Prog y Logueados (ACUMULADOS HASTA LA FECHA DE FILTRO)
         dias_prog = 0.0
         dias_log = 0.0
         if not df_malla_mes.empty and col_m_user and col_malla_f_gen:
@@ -3026,37 +3047,6 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
         }
         df_res_asesores_full = pd.concat([df_res_asesores, pd.DataFrame([tot_row_a])], ignore_index=True)
 
-        def time_to_sec(t_str):
-            if pd.isna(t_str) or not isinstance(t_str, str): return 0
-            parts = str(t_str).split(":")
-            if len(parts) == 3:
-                try: return int(parts[0])*3600 + int(parts[1])*60 + int(parts[2])
-                except: return 0
-            return 0
-
-        def get_color_3pt(val, vmin, vmax, c_low, c_mid, c_high):
-            if vmax == vmin: return ""
-            norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
-            if norm <= 0.5:
-                t = norm / 0.5
-                r = int(c_low[0] + t * (c_mid[0] - c_low[0]))
-                g = int(c_low[1] + t * (c_mid[1] - c_low[1]))
-                b = int(c_low[2] + t * (c_mid[2] - c_low[2]))
-            else:
-                t = (norm - 0.5) / 0.5
-                r = int(c_mid[0] + t * (c_high[0] - c_mid[0]))
-                g = int(c_mid[1] + t * (c_high[1] - c_mid[1]))
-                b = int(c_high[2] + t * (c_high[2] - c_mid[2]))
-            return f"background-color: rgb({r},{g},{b}); color: #000000;"
-
-        def get_color_2pt(val, vmin, vmax, c_low, c_high):
-            if vmax == vmin: return ""
-            norm = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
-            r = int(c_low[0] + norm * (c_high[0] - c_low[0]))
-            g = int(c_low[1] + norm * (c_high[1] - c_low[1]))
-            b = int(c_low[2] + norm * (c_high[2] - c_low[2]))
-            return f"background-color: rgb({r},{g},{b}); color: #000000;"
-
         def style_tabla_asesores(df_in):
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
             df_no_tot = df_in[df_in["Asesor"] != "TOTAL GENERAL"]
@@ -3065,8 +3055,11 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             ap_min, ap_max = (ap_mes_s.min(), ap_mes_s.max()) if not ap_mes_s.empty else (0,1)
             if ap_max == ap_min: ap_max = ap_min + 0.01
 
+            sph_s = pd.to_numeric(df_no_tot["SPH"], errors="coerce").dropna()
+            sph_min, sph_max = (sph_s.min(), sph_s.max()) if not sph_s.empty else (0,1)
+            if sph_max == sph_min: sph_max = sph_min + 0.01
+
             sec_dict = {c: df_no_tot[c].apply(lambda x: time_to_sec(str(x))) for c in ["Costumer", "Pausa", "Dead", "Dispo"] if c in df_no_tot.columns}
-            
             max_dead = max(sec_dict.get("Dead", pd.Series([0])).max(), 601)
             max_dispo = max(sec_dict.get("Dispo", pd.Series([0])).max(), 1201)
             
@@ -3124,12 +3117,23 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                             if sec > 0: cell_style += " " + get_color_2pt(sec, min_pausa, max_pausa, (255,255,255), (248,140,140))
                         elif col == "Dead":
                             sec = time_to_sec(row[col])
-                            if sec > 600: # Más de 10 min
-                                cell_style += " " + get_color_2pt(sec, 600, max_dead, (252,165,165), (153,27,27)) # Rojo claro a Rojo intenso
+                            if sec > 600:
+                                cell_style += " " + get_color_2pt(sec, 600, max_dead, (252,165,165), (153,27,27))
                         elif col == "Dispo":
                             sec = time_to_sec(row[col])
-                            if sec > 1200: # Más de 20 min
-                                cell_style += " " + get_color_2pt(sec, 1200, max_dispo, (252,165,165), (153,27,27)) # Rojo claro a Rojo intenso
+                            if sec > 1200:
+                                cell_style += " " + get_color_2pt(sec, 1200, max_dispo, (252,165,165), (153,27,27))
+                        elif col == "SPH":
+                            try:
+                                v_sph = float(row[col])
+                                cell_style += " " + get_color_3pt(v_sph, sph_min, sph_max, (248,140,140), (254,234,138), (162,217,163))
+                            except: pass
+                        elif col in ["Comisión", "Comis Final", "Puntos Adicionales Platinum", "Puntos Adicionales RCP PLT", "Puntos Adicional"]:
+                            try:
+                                v_val = float(str(row[col]).replace('$', '').replace(',', ''))
+                                if v_val > 0:
+                                    cell_style += " background-color: #dcfce7; color: #166534; font-weight: bold;"
+                            except: pass
                     styles.loc[idx, col] = cell_style.strip()
             return styles
 
@@ -3214,17 +3218,28 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
         def style_tabla_sup(df_in):
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
+            df_no_tot = df_in[df_in["Supervisor"] != "TOTAL GENERAL"]
+            
+            metrics_t2 = ["LE dia", "% LE Día", "AP Mes + Cosecha", "% LE Mes", "%AP Mes"]
+            bounds_t2 = {}
+            for m in metrics_t2:
+                s = pd.to_numeric(df_no_tot[m], errors="coerce").dropna()
+                bmin, bmax = (s.min(), s.max()) if not s.empty else (0, 1)
+                if bmax == bmin: bmax = bmin + 0.01
+                bounds_t2[m] = (bmin, bmax)
+
             for idx, row in df_in.iterrows():
                 is_total = (row["Supervisor"] == "TOTAL GENERAL")
                 bg_tot = "font-weight: bold; background-color: #f0f2f6;" if is_total else ""
                 
                 for col in df_in.columns:
                     cell_style = f"text-align: center !important; {bg_tot}"
-                    if not is_total and col in ["% LE Día", "% LE Mes"]:
+                    if not is_total and col in metrics_t2:
                         try:
-                            v_p = float(row[col])
-                            if v_p >= 0.40: cell_style += " background-color: #dcfce7; color: #166534; font-weight: bold;"
-                            elif v_p >= 0.25: cell_style += " background-color: #fef3c7; color: #92400e;"
+                            v_val = float(row[col])
+                            bmin, bmax = bounds_t2[col]
+                            # Naranja (Bajo) a Verde (Alto)
+                            cell_style += " " + get_color_2pt(v_val, bmin, bmax, (254,210,120), (162,217,163))
                         except: pass
                     styles.loc[idx, col] = cell_style.strip()
             return styles
@@ -3248,21 +3263,17 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
     # -------------------------------------------------------------------------
     st.subheader("3. Resumen por Validador")
 
-    validadores_list = [
-        "VALIDADOR IA AMEX DOS", "VALIDADOR IA AMEX", "Jovel Chilito Karen Natalia",
-        "Rodriguez Grood Heidy Daniela", "Rodriguez Grood Charling Vanessa"
-    ]
+    col_val_vta = next((c for c in df_vta_m3_base.columns if str(c).upper() in ["VALIDADOR", "VALIDADOR_NOMBRE", "NOMBRE_VALIDADOR", "NOMBRE VALIDADOR"]), df_vta_m3_base.columns[24] if len(df_vta_m3_base.columns) > 24 else None)
+
+    if col_val_vta and not df_vta_m3_base.empty:
+        validadores_list = [v for v in df_vta_m3_base[col_val_vta].dropna().unique() if str(v).strip() != "" and str(v).upper() not in ["NAN", "NONE", "-"]]
+    else:
+        validadores_list = []
 
     val_rows = []
-    col_val_vta = next((c for c in df_ventas.columns if str(c).upper() in ["VALIDADOR", "VALIDADOR_NOMBRE", "NOMBRE_VALIDADOR", "NOMBRE VALIDADOR"]), None) if ("df_ventas" in locals() and not df_ventas.empty) else None
-
     for val in validadores_list:
-        if col_val_vta and not df_vta_m3_base.empty:
-            sub_vm = df_vta_m3_base[df_vta_m3_base[col_val_vta].astype(str).str.strip().str.upper() == val.upper()]
-            sub_vd = df_vta_dia[df_vta_dia[col_val_vta].astype(str).str.strip().str.upper() == val.upper()] if not df_vta_dia.empty else pd.DataFrame()
-        else:
-            sub_vm = pd.DataFrame()
-            sub_vd = pd.DataFrame()
+        sub_vm = df_vta_m3_base[df_vta_m3_base[col_val_vta].astype(str).str.strip().str.upper() == str(val).strip().upper()] if not df_vta_m3_base.empty else pd.DataFrame()
+        sub_vd = df_vta_dia[df_vta_dia[col_val_vta].astype(str).str.strip().str.upper() == str(val).strip().upper()] if not df_vta_dia.empty else pd.DataFrame()
 
         tram_d = float(len(sub_vd))
         le_d = float((sub_vd["ESTADO"] == "LEAD EFECTIVO").sum()) if "ESTADO" in sub_vd.columns else 0.0
@@ -3304,6 +3315,16 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
 
         def style_tabla_val(df_in):
             styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
+            df_no_tot = df_in[df_in["Agente"] != "TOTAL GENERAL"]
+            
+            metrics_t3 = ["% LE", "% LE Mes", "%AP"]
+            bounds_t3 = {}
+            for m in metrics_t3:
+                s = pd.to_numeric(df_no_tot[m], errors="coerce").dropna()
+                bmin, bmax = (s.min(), s.max()) if not s.empty else (0, 1)
+                if bmax == bmin: bmax = bmin + 0.01
+                bounds_t3[m] = (bmin, bmax)
+
             for idx, row in df_in.iterrows():
                 is_total = (row["Agente"] == "TOTAL GENERAL")
                 bg_tot = "font-weight: bold; background-color: #f0f2f6;" if is_total else ""
@@ -3317,6 +3338,13 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
                                 if v_r <= 0.05: cell_style += " background-color: #dcfce7; color: #166534;"
                                 elif v_r <= 0.10: cell_style += " background-color: #fef3c7; color: #92400e;"
                                 else: cell_style += " background-color: #fee2e2; color: #991b1b; font-weight: bold;"
+                            except: pass
+                        elif col in metrics_t3:
+                            try:
+                                v_val = float(row[col])
+                                bmin, bmax = bounds_t3[col]
+                                # Naranja (Bajo) a Verde (Alto)
+                                cell_style += " " + get_color_2pt(v_val, bmin, bmax, (254,210,120), (162,217,163))
                             except: pass
                     styles.loc[idx, col] = cell_style.strip()
             return styles
