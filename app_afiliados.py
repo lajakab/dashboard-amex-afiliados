@@ -2993,7 +2993,7 @@ elif opcion_hoja == "🗓️ Módulo 3: Productividad Diaria":
             "Total AP": df_res_asesores["Total AP"].sum(),
             "% AP MES": (df_res_asesores["AP Mes"].sum() / df_res_asesores["LE Mes"].sum()) if df_res_asesores["LE Mes"].sum() > 0 else 0.0,
             "Llamadas Efectivas": df_res_asesores[df_res_asesores["Llamadas Efectivas"].apply(lambda x: isinstance(x, (int, float)))]["Llamadas Efectivas"].sum(),
-            "Conv Tram / Llam": "-", "Costumer": "-", "Pausa": "-", "Dead": "-", "Dispo": "-", "SPH": "-",
+            "Conv Tram / Llam": None, "Costumer": "-", "Pausa": "-", "Dead": "-", "Dispo": "-", "SPH": "-",
             "Puntos": df_res_asesores["Puntos"].sum(),
             "Comisión": df_res_asesores["Comisión"].sum(),
             "GRCC Platinum": df_res_asesores["GRCC Platinum"].sum(),
