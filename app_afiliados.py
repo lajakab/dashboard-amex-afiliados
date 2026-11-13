@@ -3823,12 +3823,17 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
     st.header("🧑‍💼 Módulo 4: Análisis Integral por Supervisor")
     st.caption("Consolidado gerencial, matrices operativas, históricos diarios/mensuales y gráficas de evolución, centralizados por Supervisor.")
 
-    # --- 1. FILTROS DEL MÓDULO 4 ---
+    # --- 1. FILTROS DEL MÓDULO 4 (BLINDADOS) ---
     st.sidebar.header("🔍 Filtros Módulo 4")
     
-    # Preparar fechas
-    if "df_ventas" in locals() and not df_ventas.empty and "F_VTA" in df_ventas.columns:
-        fechas_validas_vta = pd.Series(df_ventas["F_VTA"]).dropna()
+    if "df_ventas" in locals() and not df_ventas.empty:
+        df_ventas.columns = [str(c).strip() for c in df_ventas.columns]
+    
+    col_sup = next((c for c in df_ventas.columns if c.upper() == "SUPERVISOR"), None)
+    col_vta = next((c for c in df_ventas.columns if c.upper() in ["F_VTA", "FECHA_VTA", "FECHA"]), None)
+
+    if "df_ventas" in locals() and not df_ventas.empty and col_vta:
+        fechas_validas_vta = pd.Series(df_ventas[col_vta]).dropna()
         años_disp = sorted(pd.to_datetime(fechas_validas_vta, errors="coerce").dt.year.dropna().unique().astype(int))
     else:
         fechas_validas_vta = pd.Series(dtype='object')
@@ -3836,27 +3841,44 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
         
     año_sel = st.sidebar.selectbox("Año Operativo", años_disp, index=len(años_disp) - 1, key="m4_año_sel")
 
-    fechas_año = fechas_validas_vta[pd.to_datetime(fechas_validas_vta, errors="coerce").dt.year == año_sel]
-    meses_disp = sorted(pd.to_datetime(fechas_año, errors="coerce").dt.month.dropna().unique().astype(int)) if not fechas_año.empty else [date.today().month]
+    if not fechas_validas_vta.empty and col_vta:
+        fechas_año = fechas_validas_vta[pd.to_datetime(fechas_validas_vta, errors="coerce").dt.year == año_sel]
+        meses_disp = sorted(pd.to_datetime(fechas_año, errors="coerce").dt.month.dropna().unique().astype(int))
+    else:
+        meses_disp = [date.today().month]
     
     nombres_meses = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
     mes_formateado = [nombres_meses[m] for m in meses_disp if m in nombres_meses]
     mes_sel_nombre = st.sidebar.selectbox("Mes Operativo", mes_formateado, index=len(mes_formateado) - 1, key="m4_mes_sel") if mes_formateado else "Noviembre"
     mes_sel = {v: k for k, v in nombres_meses.items()}.get(mes_sel_nombre, date.today().month)
 
-    fechas_mes_disp = sorted(pd.to_datetime(fechas_año[pd.to_datetime(fechas_año, errors="coerce").dt.month == mes_sel], errors="coerce").dt.date.unique())
+    if not fechas_validas_vta.empty and col_vta:
+        fechas_mes_disp = sorted(pd.to_datetime(fechas_año[pd.to_datetime(fechas_año, errors="coerce").dt.month == mes_sel], errors="coerce").dt.date.unique())
+    else:
+        fechas_mes_disp = []
     if not fechas_mes_disp: fechas_mes_disp = [date(año_sel, mes_sel, 1)]
+    
     fecha_sel_dia = st.sidebar.selectbox("📅 Fecha Específica (Para histórico diario):", options=fechas_mes_disp, format_func=lambda d: d.strftime("%Y-%m-%d"), index=len(fechas_mes_disp) - 1, key="m4_fecha_dia_sel")
 
-    # Filtro Supervisor
-    df_vta_m4 = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == mes_sel)].copy() if not df_ventas.empty else pd.DataFrame()
-    sups_disp = ["Todos"] + sorted([str(s).strip() for s in df_vta_m4["Supervisor"].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "-", "SIN SUPERVISOR"]])
+    if "df_ventas" in locals() and not df_ventas.empty and col_vta:
+        df_vta_m4 = df_ventas[
+            (pd.to_datetime(df_ventas[col_vta], errors="coerce").dt.year == año_sel) & 
+            (pd.to_datetime(df_ventas[col_vta], errors="coerce").dt.month == mes_sel)
+        ].copy()
+    else:
+        df_vta_m4 = pd.DataFrame()
+
+    if col_sup and not df_vta_m4.empty:
+        sups_disp = ["Todos"] + sorted([str(s).strip() for s in df_vta_m4[col_sup].dropna().unique() if str(s).strip() and str(s).upper() not in ["NAN", "-", "SIN SUPERVISOR"]])
+    else:
+        sups_disp = ["Todos"]
+
     sup_sel_m4 = st.sidebar.selectbox("Filtrar Supervisor:", sups_disp, index=0, key="m4_sup_filter")
     
-    if sup_sel_m4 != "Todos":
-        df_vta_m4 = df_vta_m4[df_vta_m4["Supervisor"].astype(str).str.strip() == sup_sel_m4]
+    if sup_sel_m4 != "Todos" and col_sup and not df_vta_m4.empty:
+        df_vta_m4 = df_vta_m4[df_vta_m4[col_sup].astype(str).str.strip() == sup_sel_m4]
 
-    # --- 2. FUNCIONES DE ESTILO (Módulo 4) ---
+    # --- 2. FUNCIONES DE ESTILO Y COLOR ---
     def m4_color_scale(val, vmin, vmax, c_low, c_mid, c_high):
         if pd.isna(val) or type(val) == str: return ""
         if vmax == vmin: return ""
@@ -3864,12 +3886,12 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
         if norm <= 0.5:
             t = norm / 0.5; r = int(c_low[0] + t * (c_mid[0] - c_low[0])); g = int(c_low[1] + t * (c_mid[1] - c_low[1])); b = int(c_low[2] + t * (c_mid[2] - c_low[2]))
         else:
-            t = (norm - 0.5) / 0.5; r = int(c_mid[0] + t * (c_high[0] - c_mid[0])); g = int(c_mid[1] + t * (c_high[1] - c_mid[1])); b = int(c_high[2] + t * (c_high[2] - c_mid[2]))
+            t = (norm - 0.5) / 0.5; r = int(c_mid[0] + t * (c_high[0] - c_mid[0])); g = int(c_mid[1] + t * (c_high[1] - c_mid[1])); b = int(c_mid[2] + t * (c_high[2] - c_mid[2]))
         return f"background-color: rgb({r},{g},{b}); color: #000000;"
 
     def m4_apply_cond_formatting(df_in):
         styles = pd.DataFrame("", index=df_in.index, columns=df_in.columns)
-        df_no_tot = df_in[df_in["Supervisor"] != "TOTAL"]
+        df_no_tot = df_in[df_in["Supervisor"] != "TOTAL"] if "Supervisor" in df_in.columns else df_in
         for col in df_in.columns:
             if col in ["Supervisor", "Fecha", "Periodo"]:
                 for idx, row in df_in.iterrows():
@@ -3882,7 +3904,6 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
                         styles.loc[idx, col] = "text-align: center; font-weight: bold; background-color: #f0f2f6;"
                     else:
                         val = row[col]
-                        # Invertir colores para No Eval y Declinados (rojo es malo)
                         if "No Eval" in col or "Decl" in col:
                             color = m4_color_scale(val, vmin, vmax, (162,217,163), (254,210,120), (248,140,140))
                         else:
@@ -3894,38 +3915,37 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
     sup_records = []
     inicio_mes = pd.Timestamp(date(año_sel, mes_sel, 1))
     
-    for sup, grp in df_vta_m4.groupby("Supervisor"):
-        if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
-        
-        tramites = len(grp)
-        asesores_unicos = grp["agente"].nunique()
-        le_v = (grp["ESTADO"] == "LEAD EFECTIVO").sum()
-        dec = grp["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in grp.columns else pd.Series("", index=grp.index)
-        
-        # AP Mes
-        ap_m_mask = (grp["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) & (dec == "A")
-        ap_m = ap_m_mask.sum()
-        
-        # AP Cosecha
-        df_cos_sup = df_ventas[(df_ventas["Supervisor"].astype(str).str.strip() == sup) & (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce") < inicio_mes) & (df_ventas["DECISION"].astype(str).str.strip().str.upper() == "A")]
-        ap_cos = len(df_cos_sup)
-        ap_tot = ap_m + ap_cos
-        
-        eval_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum()
-        no_eval_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec.isin(["-", "NONE", "NAN", ""]) | (grp.get("BX_EMPTY", pd.Series(False, index=grp.index))))).sum()
-        decl_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec == "D")).sum()
-        
-        sup_records.append({
-            "Supervisor": sup, "Asesores": asesores_unicos, "Trámites": tramites, "LE": le_v,
-            "% LE": (le_v / tramites) if tramites > 0 else 0.0, "AP Mes": ap_m, "AP Cosecha": ap_cos, "Total AP": ap_tot,
-            "% AP": (ap_tot / le_v) if le_v > 0 else 0.0, "Eval": eval_v, "% Eval": (eval_v / le_v) if le_v > 0 else 0.0,
-            "No Evaluado": no_eval_v, "% No Eval": (no_eval_v / le_v) if le_v > 0 else 0.0, "Declinado": decl_v,
-            "% Decl": (decl_v / le_v) if le_v > 0 else 0.0
-        })
-        
+    if not df_vta_m4.empty and col_sup:
+        for sup, grp in df_vta_m4.groupby(col_sup):
+            if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
+            
+            tramites = len(grp)
+            asesores_unicos = grp["agente"].nunique() if "agente" in grp.columns else 0
+            le_v = (grp["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in grp.columns else 0
+            dec = grp["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in grp.columns else pd.Series("", index=grp.index)
+            
+            ap_m_mask = (grp["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) & (dec == "A") if "ESTADO" in grp.columns and "F_DEC_EFF" in grp.columns else pd.Series(False, index=grp.index)
+            ap_m = ap_m_mask.sum()
+            
+            df_cos_sup = df_ventas[(df_ventas[col_sup].astype(str).str.strip() == str(sup)) & (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.year == año_sel) & (pd.to_datetime(df_ventas["F_DEC_EFF"], errors="coerce").dt.month == mes_sel) & (pd.to_datetime(df_ventas[col_vta], errors="coerce") < inicio_mes) & (df_ventas["DECISION"].astype(str).str.strip().str.upper() == "A")] if "F_DEC_EFF" in df_ventas.columns and col_vta in df_ventas.columns else pd.DataFrame()
+            ap_cos = len(df_cos_sup)
+            ap_tot = ap_m + ap_cos
+            
+            eval_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum() if "ESTADO" in grp.columns else 0
+            no_eval_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec.isin(["-", "NONE", "NAN", ""]) | (grp.get("BX_EMPTY", pd.Series(False, index=grp.index))))).sum() if "ESTADO" in grp.columns else 0
+            decl_v = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec == "D")).sum() if "ESTADO" in grp.columns else 0
+            
+            sup_records.append({
+                "Supervisor": sup, "Asesores": asesores_unicos, "Trámites": tramites, "LE": le_v,
+                "% LE": (le_v / tramites) if tramites > 0 else 0.0, "AP Mes": ap_m, "AP Cosecha": ap_cos, "Total AP": ap_tot,
+                "% AP": (ap_tot / le_v) if le_v > 0 else 0.0, "Eval": eval_v, "% Eval": (eval_v / le_v) if le_v > 0 else 0.0,
+                "No Evaluado": no_eval_v, "% No Eval": (no_eval_v / le_v) if le_v > 0 else 0.0, "Declinado": decl_v,
+                "% Decl": (decl_v / le_v) if le_v > 0 else 0.0
+            })
+            
     df_sup_matrix = pd.DataFrame(sup_records)
 
-    # --- 4. RENDERIZADO DE PESTAÑAS ---
+    # --- 4. RENDERIZADO DE PESTAÑAS (TABS) ---
     t1, t2, t3, t4, t5 = st.tabs([
         "🗂️ Tarjetas Resumen", 
         "📊 Matrices Operativas", 
@@ -3985,7 +4005,6 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
             df_prod = df_sup_matrix[["Supervisor", "Asesores", "Trámites", "LE", "% LE", "AP Mes", "AP Cosecha", "Total AP", "% AP"]].copy()
             df_conv = df_sup_matrix[["Supervisor", "LE", "Eval", "% Eval", "No Evaluado", "% No Eval", "Declinado", "% Decl"]].copy()
             
-            # Fila de Totales
             tot_p = df_prod.sum(numeric_only=True).to_dict(); tot_p["Supervisor"] = "TOTAL"; tot_p["% LE"] = tot_p["LE"]/tot_p["Trámites"]; tot_p["% AP"] = tot_p["Total AP"]/tot_p["LE"]
             df_prod = pd.concat([df_prod, pd.DataFrame([tot_p])], ignore_index=True)
             
@@ -4003,40 +4022,43 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
     # ------------------ PESTAÑA 3: PRODUCTIVIDAD DIARIA ------------------
     with t3:
         st.markdown(f"##### 3. Productividad del Día por Supervisor ({fecha_sel_dia.strftime('%d-%b-%Y')})")
-        df_dia = df_vta_m4[pd.to_datetime(df_vta_m4["F_VTA"], errors="coerce").dt.date == fecha_sel_dia]
-        if not df_dia.empty:
+        df_dia = df_vta_m4[pd.to_datetime(df_vta_m4[col_vta], errors="coerce").dt.date == fecha_sel_dia] if col_vta else pd.DataFrame()
+        if not df_dia.empty and col_sup:
             dia_recs = []
-            for sup, grp in df_dia.groupby("Supervisor"):
+            for sup, grp in df_dia.groupby(col_sup):
                 if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
                 tram_d = len(grp)
-                le_d = (grp["ESTADO"] == "LEAD EFECTIVO").sum()
-                dec = grp["DECISION"].astype(str).str.strip().str.upper()
-                ap_d = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec == "A")).sum()
-                eval_d = ((grp["ESTADO"] == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum()
+                le_d = (grp["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in grp.columns else 0
+                dec = grp["DECISION"].astype(str).str.strip().str.upper() if "DECISION" in grp.columns else pd.Series("", index=grp.index)
+                ap_d = ((grp["ESTADO"] == "LEAD EFECTIVO") & (dec == "A")).sum() if "ESTADO" in grp.columns else 0
+                eval_d = ((grp["ESTADO"] == "LEAD EFECTIVO") & dec.isin(["A", "D", "P", "C"])).sum() if "ESTADO" in grp.columns else 0
                 
                 dia_recs.append({
                     "Supervisor": sup, "Trámites Día": tram_d, "LE Día": le_d, "% LE Día": (le_d/tram_d) if tram_d>0 else 0.0,
                     "AP Día": ap_d, "% AP Día": (ap_d/le_d) if le_d>0 else 0.0, "Eval Día": eval_d, "% Eval Día": (eval_d/le_d) if le_d>0 else 0.0
                 })
             df_dia_matrix = pd.DataFrame(dia_recs)
-            tot_d = df_dia_matrix.sum(numeric_only=True).to_dict(); tot_d["Supervisor"] = "TOTAL"; tot_d["% LE Día"] = tot_d["LE Día"]/tot_d["Trámites Día"]; tot_d["% AP Día"] = tot_d["AP Día"]/tot_d["LE Día"]; tot_d["% Eval Día"] = tot_d["Eval Día"]/tot_d["LE Día"]
-            df_dia_matrix = pd.concat([df_dia_matrix, pd.DataFrame([tot_d])], ignore_index=True)
-            
-            st.dataframe(df_dia_matrix.style.format({"Trámites Día": "{:,.0f}", "LE Día": "{:,.0f}", "% LE Día": "{:.1%}", "AP Día": "{:.0f}", "% AP Día": "{:.1%}", "Eval Día": "{:.0f}", "% Eval Día": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
+            if not df_dia_matrix.empty:
+                tot_d = df_dia_matrix.sum(numeric_only=True).to_dict(); tot_d["Supervisor"] = "TOTAL"; tot_d["% LE Día"] = tot_d["LE Día"]/tot_d["Trámites Día"] if tot_d["Trámites Día"]>0 else 0; tot_d["% AP Día"] = tot_d["AP Día"]/tot_d["LE Día"] if tot_d["LE Día"]>0 else 0; tot_d["% Eval Día"] = tot_d["Eval Día"]/tot_d["LE Día"] if tot_d["LE Día"]>0 else 0
+                df_dia_matrix = pd.concat([df_dia_matrix, pd.DataFrame([tot_d])], ignore_index=True)
+                
+                st.dataframe(df_dia_matrix.style.format({"Trámites Día": "{:,.0f}", "LE Día": "{:,.0f}", "% LE Día": "{:.1%}", "AP Día": "{:.0f}", "% AP Día": "{:.1%}", "Eval Día": "{:.0f}", "% Eval Día": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
+            else:
+                st.info("No hay suficientes registros para armar el consolidado diario.")
         else:
             st.info(f"No hay registros de ventas para la fecha seleccionada ({fecha_sel_dia}).")
 
     # ------------------ PESTAÑA 4: HISTÓRICOS ------------------
     with t4:
         st.markdown("##### 4. Histórico Diario por Supervisor (Evolución del Mes)")
-        if not df_vta_m4.empty:
-            df_vta_m4['Dia_VTA'] = pd.to_datetime(df_vta_m4['F_VTA']).dt.strftime('%Y-%m-%d')
+        if not df_vta_m4.empty and col_vta and col_sup:
+            df_vta_m4['Dia_VTA'] = pd.to_datetime(df_vta_m4[col_vta]).dt.strftime('%Y-%m-%d')
             hist_dia_recs = []
-            for (dia, sup), grp in df_vta_m4.groupby(['Dia_VTA', 'Supervisor']):
+            for (dia, sup), grp in df_vta_m4.groupby(['Dia_VTA', col_sup]):
                 if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
                 tram = len(grp)
-                le = (grp["ESTADO"] == "LEAD EFECTIVO").sum()
-                ap = ((grp["ESTADO"] == "LEAD EFECTIVO") & (grp["DECISION"].astype(str).str.strip().str.upper() == "A")).sum()
+                le = (grp["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in grp.columns else 0
+                ap = ((grp["ESTADO"] == "LEAD EFECTIVO") & (grp["DECISION"].astype(str).str.strip().str.upper() == "A")).sum() if "ESTADO" in grp.columns and "DECISION" in grp.columns else 0
                 hist_dia_recs.append({"Fecha": dia, "Supervisor": sup, "Trámites": tram, "LE": le, "AP": ap, "% AP": (ap/le) if le>0 else 0.0})
             
             df_hd = pd.DataFrame(hist_dia_recs)
@@ -4047,27 +4069,28 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
         st.divider()
         
         st.markdown("##### 5. Histórico Mes a Mes por Supervisor (Acumulado Anual)")
-        meses_historicos = sorted(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.to_period("M").dropna().unique())
-        hist_mes_recs = []
-        for per in meses_historicos:
-            m_y, m_m = per.year, per.month
-            grp_hist = df_ventas[(pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.year == m_y) & (pd.to_datetime(df_ventas["F_VTA"], errors="coerce").dt.month == m_m)]
-            for sup, grp in grp_hist.groupby("Supervisor"):
-                if sup_sel_m4 != "Todos" and sup != sup_sel_m4: continue
-                if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
-                tram = len(grp)
-                le = (grp["ESTADO"] == "LEAD EFECTIVO").sum()
-                ap = ((grp["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.year == m_y) & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.month == m_m) & (grp["DECISION"].astype(str).str.strip().str.upper() == "A")).sum()
-                hist_mes_recs.append({"Periodo": f"{m_y}-{m_m:02d}", "Supervisor": sup, "Trámites": tram, "LE": le, "AP Mes": ap, "% AP": (ap/le) if le>0 else 0.0})
-        
-        df_hist_sup = pd.DataFrame(hist_mes_recs)
-        if not df_hist_sup.empty:
-            df_hist_sup = df_hist_sup.sort_values(["Periodo", "Supervisor"])
-            st.dataframe(df_hist_sup.style.format({"Trámites": "{:,.0f}", "LE": "{:,.0f}", "AP Mes": "{:.0f}", "% AP": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
+        if "df_ventas" in locals() and not df_ventas.empty and col_vta and col_sup:
+            meses_historicos = sorted(pd.to_datetime(df_ventas[col_vta], errors="coerce").dt.to_period("M").dropna().unique())
+            hist_mes_recs = []
+            for per in meses_historicos:
+                m_y, m_m = per.year, per.month
+                grp_hist = df_ventas[(pd.to_datetime(df_ventas[col_vta], errors="coerce").dt.year == m_y) & (pd.to_datetime(df_ventas[col_vta], errors="coerce").dt.month == m_m)]
+                for sup, grp in grp_hist.groupby(col_sup):
+                    if sup_sel_m4 != "Todos" and sup != sup_sel_m4: continue
+                    if str(sup).strip().upper() in ["NAN", "-", "SIN SUPERVISOR", ""]: continue
+                    tram = len(grp)
+                    le = (grp["ESTADO"] == "LEAD EFECTIVO").sum() if "ESTADO" in grp.columns else 0
+                    ap = ((grp["ESTADO"] == "LEAD EFECTIVO") & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.year == m_y) & (pd.to_datetime(grp["F_DEC_EFF"], errors="coerce").dt.month == m_m) & (grp["DECISION"].astype(str).str.strip().str.upper() == "A")).sum() if "ESTADO" in grp.columns and "F_DEC_EFF" in grp.columns and "DECISION" in grp.columns else 0
+                    hist_mes_recs.append({"Periodo": f"{m_y}-{m_m:02d}", "Supervisor": sup, "Trámites": tram, "LE": le, "AP Mes": ap, "% AP": (ap/le) if le>0 else 0.0})
+            
+            df_hist_sup = pd.DataFrame(hist_mes_recs)
+            if not df_hist_sup.empty:
+                df_hist_sup = df_hist_sup.sort_values(["Periodo", "Supervisor"])
+                st.dataframe(df_hist_sup.style.format({"Trámites": "{:,.0f}", "LE": "{:,.0f}", "AP Mes": "{:,.0f}", "% AP": "{:.1%}"}).apply(m4_apply_cond_formatting, axis=None), use_container_width=True, hide_index=True)
 
     # ------------------ PESTAÑA 5: GRÁFICAS ------------------
     with t5:
-        st.subheader("📊 Gráficas Estratégicas (Operación vs Supervisor)")
+        st.subheader("📊 Gráficas Estratégicas por Supervisor")
         if not df_sup_matrix.empty:
             import plotly.graph_objects as go
             import plotly.express as px
@@ -4077,7 +4100,6 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
             
             c1, c2 = st.columns(2)
             with c1:
-                # 1. Volumen LE vs AP
                 fig_vol = go.Figure()
                 fig_vol.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["LE"], name='Leads Efectivos (LE)', text=df_chart["LE"], textposition='auto', marker_color="#0284c7"))
                 fig_vol.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["Total AP"], name='Total AP', text=df_chart["Total AP"], textposition='auto', marker_color="#16a34a"))
@@ -4085,7 +4107,6 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
                 st.plotly_chart(fig_vol, use_container_width=True)
             
             with c2:
-                # 2. Curva de Efectividad (% AP y Riesgo % No Eval)
                 fig_rates = go.Figure()
                 fig_rates.add_trace(go.Scatter(x=df_chart["Supervisor"], y=df_chart["% AP"], mode='lines+markers+text', name='% Aprobación', text=[f"{v:.1%}" for v in df_chart["% AP"]], textposition="top center", line=dict(color="#16a34a", width=3, shape='spline')))
                 fig_rates.add_trace(go.Scatter(x=df_chart["Supervisor"], y=df_chart["% No Eval"], mode='lines+markers+text', name='% No Evaluados', text=[f"{v:.1%}" for v in df_chart["% No Eval"]], textposition="bottom center", line=dict(color="#dc2626", width=3, dash='dot')))
@@ -4096,12 +4117,10 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
             
             c3, c4 = st.columns(2)
             with c3:
-                # 3. Dispersión Asesores vs Productividad
-                fig_scatter = px.scatter(df_chart, x="Asesores", y="LE", size="Total AP", color="Supervisor", hover_name="Supervisor", title="Relación: Tamaño de Equipo (Asesores) vs Leads Efectivos", labels={"Asesores": "Cantidad de Asesores", "LE": "Leads Efectivos"}, size_max=40)
+                fig_scatter = px.scatter(df_chart, x="Asesores", y="LE", size="Total AP", color="Supervisor", hover_name="Supervisor", title="Relación: Tamaño de Equipo vs Leads Efectivos", labels={"Asesores": "Cantidad de Asesores", "LE": "Leads Efectivos"}, size_max=40)
                 st.plotly_chart(fig_scatter, use_container_width=True)
                 
             with c4:
-                # 4. Composición de Decisiones
                 fig_pie = go.Figure()
                 fig_pie.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["Eval"], name="Evaluados", marker_color="#3b82f6"))
                 fig_pie.add_trace(go.Bar(x=df_chart["Supervisor"], y=df_chart["No Evaluado"], name="No Evaluados", marker_color="#ef4444"))
