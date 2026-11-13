@@ -304,12 +304,11 @@ opcion_hoja = st.sidebar.radio(
     "Seleccione la Vista:",
     [
         "📊 Informe Gerencial por Día",
-        "👥 Operación - Asesores ",
-        "🗓️ Módulo 3: Productividad Diaria"
+        "👥 Operación - Asesores & Supervisores",
+        "🗓️ Módulo 3: Productividad Diaria",
         "🧑‍💼 Módulo 4: Análisis Supervisor"
     ]
 )
-
 # =========================================================================
 # 📊 MÓDULO 1: INFORME GERENCIAL POR DÍA (SIN NINGÚN CAMBIO)
 # =========================================================================
