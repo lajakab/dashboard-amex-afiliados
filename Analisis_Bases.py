@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, date
 import re
 import os
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
 st.set_page_config(
     page_title="Análisis Operativo de Estados Leads, Perfiles y Bases",
     page_icon="📊",
@@ -15,16 +15,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados
 st.markdown("""
 <style>
     .main-title { font-size: 26px; font-weight: 800; color: #0f172a; margin-bottom: 5px; }
     .sub-title { font-size: 14px; color: #64748b; margin-bottom: 20px; }
-    .header-section { color: #1e3a8a; font-size: 18px; font-weight: 700; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; margin-top: 15px; margin-bottom: 15px; }
+    .header-section { color: #1e3a8a; font-size: 18px; font-weight: 700; border-bottom: 2px solid #cbd5e1; padding-bottom: 6px; margin-top: 15px; margin-bottom: 15px; }
     .kpi-card { background-color: #ffffff; border-radius: 8px; padding: 12px 15px; border-left: 4px solid #2563eb; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 10px; }
-    .kpi-title { font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase; }
-    .kpi-val { font-size: 20px; font-weight: 700; color: #0f172a; }
-    .highlight-row { background-color: #eff6ff !important; font-weight: bold; }
+    .kpi-title { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; }
+    .kpi-val { font-size: 18px; font-weight: 700; color: #0f172a; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -33,7 +31,7 @@ meses_es = {
     7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
 }
 
-# 2. CARGA Y EXTRACCIÓN DE DATOS DE LA HOJA DE VENTAS
+# 2. CARGA Y PROCESAMIENTO DE DATOS
 @st.cache_data(ttl=300)
 def load_data():
     file_paths = [
@@ -59,9 +57,8 @@ def load_data():
                 continue
                 
     if df is None:
-        return pd.DataFrame(), "Archivo no localizado"
+        return pd.DataFrame(), "Archivo no encontrado"
 
-    # Limpiar nombres de columnas
     df.columns = df.columns.str.strip()
 
     def get_col(candidates, default_name):
@@ -70,13 +67,13 @@ def load_data():
                 return c
         return default_name
 
-    # Identificación flexible de columnas
+    # Mapeo de columnas según requerimientos de ventas
     col_c_val = get_col(['estatus_val', 'LEAD EFECTIVO', 'C'], 'estatus_val')
     col_e_vta = get_col(['fecha_vta', 'Fecha Vta', 'FECHA_VTA', 'E'], 'fecha_vta')
     col_h_status = get_col(['status_vta', 'Status Vta', 'H'], 'status_vta')
     col_ad_list = get_col(['List_ID', 'list_id', 'LIST_ID', 'AD'], 'List_ID')
     col_am_pixel = get_col(['url_pixel', 'URI_PIXEL', 'pixel', 'AM'], 'url_pixel')
-    col_at_decision = get_col(['status_evaluacion', 'AT Decisión', 'AT', 'status'], 'status_evaluacion')
+    col_at_decision = get_col(['status_evaluacion', 'AT Decisión', 'AT', 'status', 'status_evaluación'], 'status_evaluacion')
     col_ce_contacto = get_col(['Contacto Final Banco', 'contacto_final_banco', 'CE'], 'Contacto Final Banco')
     col_cc_edad = get_col(['edad2', 'Edad2', 'Edad', 'CC'], 'edad2')
     col_bz_score = get_col(['Score', 'score', 'BZ'], 'Score')
@@ -84,23 +81,24 @@ def load_data():
     col_aw_producto = get_col(['Tipo de Producto', 'tipo_de_producto', 'AW'], 'Tipo de Producto')
     col_s_tarjeta = get_col(['Tarjeta', 'tarjeta', 'S'], 'Tarjeta')
 
-    # Estandarizar Fechas (Columna E)
+    # Estandarización estricta de Fechas (Col E) a objetos datetime.date para evitar error de comparación
     if col_e_vta in df.columns:
-        df['fecha_vta_clean'] = pd.to_datetime(df[col_e_vta], errors='coerce').dt.date
+        df['fecha_vta_dt'] = pd.to_datetime(df[col_e_vta], errors='coerce')
+        df['fecha_vta_clean'] = df['fecha_vta_dt'].dt.date
     else:
-        df['fecha_vta_clean'] = pd.to_datetime(datetime.now().date())
+        df['fecha_vta_dt'] = pd.to_datetime('today')
+        df['fecha_vta_clean'] = datetime.now().date()
 
-    df['Año_Mes'] = pd.to_datetime(df['fecha_vta_clean']).dt.month.map(meses_es) + " " + pd.to_datetime(df['fecha_vta_clean']).dt.year.astype(str)
+    df['Año_Mes'] = df['fecha_vta_dt'].dt.month.map(meses_es) + " " + df['fecha_vta_dt'].dt.year.astype(str)
 
-    # 1. Extracción de Píxel "Thank You" (Columna AM url_pixel)
+    # 1. Cálculo de Thank You Píxel (Extracción desde Col AM url_pixel)
     if col_am_pixel in df.columns:
-        # Extrae desde thank-you/ hasta el signo '?'
         extracted = df[col_am_pixel].astype(str).str.extract(r'thank-you/([^?&]+)', expand=False)
         df['Thank_You_Pixel'] = extracted.fillna('Sin Thank You').str.replace('-', ' ').str.title()
     else:
         df['Thank_You_Pixel'] = 'Sin Thank You'
 
-    # Clean variables
+    # Estandarización de Variables Operativas
     df['Lead_Efectivo_ColC'] = df[col_c_val].fillna('NO').astype(str).str.strip().str.upper() if col_c_val in df.columns else 'LEAD EFECTIVO'
     df['Status_Vta_ColH'] = df[col_h_status].fillna('OTRO').astype(str).str.strip().str.upper() if col_h_status in df.columns else 'LEAD EFECTIVO'
     df['Contacto_CE_Clean'] = df[col_ce_contacto].fillna('Sin Gestión Banco').astype(str).str.strip().str.title() if col_ce_contacto in df.columns else 'Sin Gestión Banco'
@@ -111,7 +109,6 @@ def load_data():
     df['Producto_Clean'] = df[col_aw_producto].fillna('Sin Producto').astype(str).str.strip() if col_aw_producto in df.columns else 'Sin Producto'
     df['Tarjeta_Clean'] = df[col_s_tarjeta].fillna('Sin Tarjeta').astype(str).str.strip() if col_s_tarjeta in df.columns else 'Sin Tarjeta'
 
-    # Estatus AT (A, D, C, P, -)
     def clean_at(val):
         if pd.isna(val) or str(val).strip() in ['', '-', 'nan', 'NONE', 'None']:
             return '-'
@@ -133,9 +130,10 @@ if df_raw.empty:
     st.error("No se pudo cargar la base de datos de origen.")
     st.stop()
 
-# Rango de Fechas
-min_date = df_raw['fecha_vta_clean'].min()
-max_date = df_raw['fecha_vta_clean'].max()
+# Manejo seguro de rangos de fechas (Solución a TypeError)
+valid_dates = [d for d in df_raw['fecha_vta_clean'].tolist() if pd.notna(d)]
+min_date = min(valid_dates) if valid_dates else date.today()
+max_date = max(valid_dates) if valid_dates else date.today()
 
 rango_fechas = st.sidebar.date_input(
     "📅 Rango Fecha Venta (Col E):",
@@ -144,13 +142,13 @@ rango_fechas = st.sidebar.date_input(
     max_value=max_date
 )
 
+# Comparación segura normalizando tipos date
 if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
     f_ini, f_fin = rango_fechas
     df = df_raw[(df_raw['fecha_vta_clean'] >= f_ini) & (df_raw['fecha_vta_clean'] <= f_fin)].copy()
 else:
     df = df_raw.copy()
 
-# Filtros adicionales
 with st.sidebar.expander("👥 Edad & Servidor", expanded=True):
     edades_opt = sorted(df['Edad2_Clean'].unique().tolist())
     edad_sel = st.multiselect("Edad (Col CC):", edades_opt, default=edades_opt)
@@ -169,7 +167,7 @@ with st.sidebar.expander("🔗 Thank You Pixel (Col AM)", expanded=False):
     pixel_opt = sorted(df['Thank_You_Pixel'].unique().tolist())
     pixel_sel = st.multiselect("Thank You Pixel:", pixel_opt, default=pixel_opt)
 
-# Aplicar Filtros
+# Filtrado dinámico
 df = df[
     (df['Edad2_Clean'].isin(edad_sel)) &
     (df['Servidor_Clean'].isin(serv_sel)) &
@@ -178,14 +176,17 @@ df = df[
     (df['Thank_You_Pixel'].isin(pixel_sel))
 ]
 
-# 4. HEADER PRINCIPAL Y TOP 5 KPI CARDS
+# 4. ENCABEZADO Y TOP 5 MÉTRICAS
 st.markdown("<div class='main-title'>📊 Dashboard: Funnel y Perfil del Trámite</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>Análisis detallado de atribución, conversión de funnel, scoring y landers Thank You.</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>Consolidado analítico de conversión de funnel, scoring, perfilamiento y atribución de píxel Thank You.</div>", unsafe_allow_html=True)
 
-# SECCIÓN TOP 5 TARJETAS KPI
-st.markdown("<h3 class='header-section'>⭐ Top 5 Métricas Destacadas (Edades, Score & List ID)</h3>", unsafe_allow_html=True)
+st.markdown("<h3 class='header-section'>⭐ Top 5 Métricas Destacadas</h3>", unsafe_allow_html=True)
 
-selector_kpi_dim = st.radio("Selecciona la dimensión prioritaria para ver el Top 5:", ["Edades (Col CC)", "Score (Col BZ)", "List ID (Col AD)"], horizontal=True)
+selector_kpi_dim = st.radio(
+    "Selecciona la dimensión prioritaria para actualizar el Top 5:",
+    ["Edades (Col CC)", "Score (Col BZ)", "List ID (Col AD)"],
+    horizontal=True
+)
 
 dim_col_map = {
     "Edades (Col CC)": "Edad2_Clean",
@@ -194,33 +195,32 @@ dim_col_map = {
 }
 target_dim = dim_col_map[selector_kpi_dim]
 
-col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+c_k1, c_k2, c_k3, c_k4 = st.columns(4)
 
-with col_k1:
+with c_k1:
     st.markdown("<div class='kpi-card'><div class='kpi-title'>🟢 Top 5 Más Aprueban (A)</div>", unsafe_allow_html=True)
     top_ap = df[df['Status_AT_Clean'] == 'A'][target_dim].value_counts().head(5)
     for idx, (name, val) in enumerate(top_ap.items(), 1):
         st.write(f"**{idx}. {name}**: {val:,}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-with col_k2:
+with c_k2:
     st.markdown("<div class='kpi-card'><div class='kpi-title'>🔴 Top 5 Menos Contactan</div>", unsafe_allow_html=True)
     top_nocontact = df[df['Contacto_CE_Clean'] == 'No Contacto'][target_dim].value_counts().head(5)
     for idx, (name, val) in enumerate(top_nocontact.items(), 1):
         st.write(f"**{idx}. {name}**: {val:,}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-with col_k3:
+with c_k3:
     st.markdown("<div class='kpi-card'><div class='kpi-title'>🟠 Top 5 Más Declinan (D)</div>", unsafe_allow_html=True)
     top_decl = df[df['Status_AT_Clean'] == 'D'][target_dim].value_counts().head(5)
     for idx, (name, val) in enumerate(top_decl.items(), 1):
         st.write(f"**{idx}. {name}**: {val:,}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-with col_k4:
+with c_k4:
     st.markdown("<div class='kpi-card'><div class='kpi-title'>🔵 Top 5 Más / No Evalúan</div>", unsafe_allow_html=True)
     top_eval = df[df['Status_AT_Clean'] != '-'][target_dim].value_counts().head(5)
-    st.caption("Más Evalúan:")
     for idx, (name, val) in enumerate(top_eval.items(), 1):
         st.write(f"**{idx}. {name}**: {val:,}")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -239,16 +239,15 @@ tab_funnel, tab_list, tab_dia, tab_score = st.tabs([
 # TABLA 1: FUNNEL TRÁMITE
 # =====================================================================
 with tab_funnel:
-    st.markdown("<h3 class='header-section'>📋 Tabla 1: Funnel Trámite (Filtrado por Lead Efectivo)</h3>", unsafe_allow_html=True)
-    st.caption("Data filtrada estrictamente por 'LEAD EFECTIVO' en Columna C/estatus_val. Meses asociados a la Columna E (fecha_vta).")
+    st.markdown("<h3 class='header-section'>📋 Tabla 1: Funnel Trámite (Data Filtrada por Lead Efectivo)</h3>", unsafe_allow_html=True)
+    st.caption("Filtra Columna C de Ventas (estatus_val) por 'LEAD EFECTIVO'. Meses asociados a la Columna E (fecha_vta).")
 
-    # Filtrar solo Lead Efectivo
     df_funnel_le = df[df['Lead_Efectivo_ColC'].isin(['LEAD EFECTIVO', 'SI', 'EFECTIVO'])].copy()
 
     if df_funnel_le.empty:
-        st.warning("No hay datos en estado LEAD EFECTIVO para los filtros seleccionados.")
+        st.warning("No hay registros en estado LEAD EFECTIVO con los filtros aplicados.")
     else:
-        meses_ordenados = sorted(df_funnel_le['Año_Mes'].unique(), key=lambda x: pd.to_datetime(x, format='%B %Y', errors='coerce') if ' ' in x else x)
+        meses_ordenados = sorted(df_funnel_le['Año_Mes'].unique())
 
         rows_def = [
             'Lead Efectivo',
@@ -315,9 +314,20 @@ with tab_funnel:
             matrix_rows.append(row_dict)
 
         df_funnel_final = pd.DataFrame(matrix_rows)
-        st.dataframe(df_funnel_final, use_container_width=True, hide_index=True)
 
-        # Gráfico Visual de Conversión del Funnel
+        # Aplicación de resaltado de estilo por concepto
+        def highlight_funnel_rows(row):
+            concepto = str(row['Concepto'])
+            if concepto in ['No Contacto', 'Contacto Final', 'Evaluado']:
+                return ['background-color: #f1f5f9; font-weight: bold;'] * len(row)
+            elif concepto == 'Aprobadas (A)':
+                return ['background-color: #dcfce7; font-weight: bold;'] * len(row)
+            elif concepto == 'Declinada (D)':
+                return ['background-color: #fee2e2;'] * len(row)
+            return [''] * len(row)
+
+        st.dataframe(df_funnel_final.style.apply(highlight_funnel_rows, axis=1), use_container_width=True, hide_index=True)
+
         st.subheader("📊 Gráfica de Embudo de Conversión Operativo")
         funnel_counts = {
             'Lead Efectivo': len(df_funnel_le),
@@ -336,11 +346,10 @@ with tab_funnel:
 
 
 # =====================================================================
-# TABLA 2: FUNNEL POR LIST ID (JERARQUÍA DINÁMICA)
+# TABLA 2: FUNNEL POR LIST ID Y AGRUPADORES
 # =====================================================================
 with tab_list:
-    st.markdown("<h3 class='header-section'>🗂️ Tabla 2: Funnel por List ID / Agrupadores Jerárquicos</h3>", unsafe_allow_html=True)
-    st.caption("Selecciona el agrupador principal y visualiza los volúmenes, porcentajes de efectividad y resoluciones por mes.")
+    st.markdown("<h3 class='header-section'>🗂️ Tabla 2: Funnel por List ID / Agrupadores Dinámicos</h3>", unsafe_allow_html=True)
 
     col_sec1, col_sec2 = st.columns([1.5, 1])
     with col_sec1:
@@ -349,9 +358,16 @@ with tab_list:
             ["List_ID_Clean", "Edad2_Clean", "Score_Clean", "Thank_You_Pixel", "Servidor_Clean"],
             format_func=lambda x: x.replace('_Clean', '').replace('_', ' ')
         )
+    with col_sec2:
+        sub_dims = st.multiselect(
+            "Seleccionar Sub-datos para desglosar:",
+            ["Edad2_Clean", "Score_Clean", "Thank_You_Pixel", "Servidor_Clean"],
+            default=[]
+        )
 
-    # Agrupación por Dimensión y Mes
-    df_t2 = df.groupby([primary_dim, 'Año_Mes']).apply(lambda g: pd.Series({
+    group_cols = [primary_dim] + [sd for sd in sub_dims if sd != primary_dim] + ['Año_Mes']
+
+    df_t2 = df.groupby(group_cols).apply(lambda g: pd.Series({
         'Trámites': len(g),
         'Lead Efectivo': (g['Status_Vta_ColH'] == 'LEAD EFECTIVO').sum(),
         'Otros': (g['Status_Vta_ColH'] != 'LEAD EFECTIVO').sum(),
@@ -362,7 +378,6 @@ with tab_list:
         'Pendientes': (g['Status_AT_Clean'] == 'P').sum(),
     }), include_groups=False).reset_index()
 
-    # Cálculo de Porcentajes
     df_t2['% LE'] = (df_t2['Lead Efectivo'] / df_t2['Trámites'] * 100).round(1).astype(str) + "%"
     df_t2['% Otros'] = (df_t2['Otros'] / df_t2['Trámites'] * 100).round(1).astype(str) + "%"
     df_t2['% Evaluadas'] = (df_t2['Evaluadas'] / df_t2['Lead Efectivo'] * 100).replace([np.inf, -np.inf], np.nan).fillna(0).round(1).astype(str) + "%"
@@ -397,7 +412,7 @@ with tab_dia:
 
     primary_dim_day = st.selectbox(
         "Dimensionar Día por:",
-        ["List_ID_Clean", "Edad2_Clean", "Score_Clean", "Thank_You_Pixel"],
+        ["List_ID_Clean", "Edad2_Clean", "Score_Clean", "Thank_You_Pixel", "Servidor_Clean"],
         key="dim_day"
     )
 
@@ -428,10 +443,10 @@ with tab_dia:
 
 
 # =====================================================================
-# TABLA 4: % AP (MATRIZ DE SCORE / SERVIDOR / LIST ID / EDAD POR MES)
+# TABLA 4: % AP (SCORE / SERVIDOR / LIST ID / EDAD POR MES)
 # =====================================================================
 with tab_score:
-    st.markdown("<h3 class='header-section'>📈 Tabla 4: Matriz de % AP (Score / Servidor / List ID / Edad por Mes)</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 class='header-section'>📈 Tabla 4: Matriz de % AP por Mes y Dimensión</h3>", unsafe_allow_html=True)
 
     dim_matriz = st.radio(
         "Seleccionar Dimensión para la Matriz % AP:",
@@ -451,7 +466,6 @@ with tab_score:
     st.markdown("#### 1. Matriz de Leads Totales por Mes")
     st.dataframe(pivot_eval, use_container_width=True, hide_index=True)
 
-    # Matriz de Aprobaciones
     df_ap_only = df[df['Status_AT_Clean'] == 'A']
     pivot_ap = df_ap_only.pivot_table(
         index=dim_matriz,
@@ -464,9 +478,8 @@ with tab_score:
     st.markdown("#### 2. Matriz de Aprobaciones (A) por Mes")
     st.dataframe(pivot_ap, use_container_width=True, hide_index=True)
 
-    # Gráfico Heatmap
-    if not pivot_ap.empty:
-        st.subheader("🔥 Mapa de Calor de Aprobaciones")
+    if not pivot_ap.empty and len(pivot_ap.columns) > 1:
+        st.subheader("🔥 Mapa de Calor de Aprobaciones por Mes")
         heatmap_data = pivot_ap.set_index(dim_matriz)
         fig_heat = px.imshow(
             heatmap_data,
