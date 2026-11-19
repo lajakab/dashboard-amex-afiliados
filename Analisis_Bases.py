@@ -41,24 +41,22 @@ def get_sort_key(an_mes):
         pass
     return (0, 0)
 
-# 2. CARGA Y PROCESAMIENTO DE DATOS
-def find_column(df, candidates, default_index=None):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    cols_norm = {str(c).strip().lower(): c for c in df.columns}
-    for c in candidates:
-        cn = str(c).strip().lower()
-        if cn in cols_norm:
-            return cols_norm[cn]
-    for c in candidates:
-        cn = str(c).strip().lower()
-        for col_real in df.columns:
-            if cn in str(col_real).strip().lower():
-                return col_real
-    if default_index is not None and default_index < len(df.columns):
-        return df.columns[default_index]
-    return candidates[0]
+# 2. LOCALIZACIÓN ROBUSTA DE COLUMNAS Y PROCESAMIENTO
+def find_best_column(df, candidate_names, fallback_idx):
+    # 1. Búsqueda exacta
+    for cand in candidate_names:
+        for col in df.columns:
+            if str(cand).strip().lower() == str(col).strip().lower():
+                return col
+    # 2. Búsqueda por subcadena
+    for cand in candidate_names:
+        for col in df.columns:
+            if str(cand).strip().lower() in str(col).strip().lower():
+                return col
+    # 3. Fallback por índice físico
+    if fallback_idx < len(df.columns):
+        return df.columns[fallback_idx]
+    return candidate_names[0]
 
 def clean_at_value(val):
     if pd.isna(val):
@@ -66,15 +64,15 @@ def clean_at_value(val):
     s = str(val).strip().upper()
     if s in ['-', '', 'NAN', 'NONE', 'NULL', 'NO EVALUADO', 'SIN EVALUAR', 'N/A', '0']:
         return '-'
-    if s == 'A' or s.startswith('APROB') or s == 'A - APROBADO':
+    if s == 'A' or 'APROB' in s or s == 'A - APROBADO':
         return 'A'
-    if s == 'D' or s.startswith('DECLIN') or s == 'D - DECLINADO':
+    if s == 'D' or 'DECLIN' in s or s == 'D - DECLINADO':
         return 'D'
-    if s == 'C' or s.startswith('CANCEL') or s == 'C - CANCELADO':
+    if s == 'C' or 'CANCEL' in s or s == 'C - CANCELADO':
         return 'C'
-    if s == 'P' or s.startswith('PEND') or s == 'P - PENDIENTE':
+    if s == 'P' or 'PEND' in s or s == 'P - PENDIENTE':
         return 'P'
-    return s
+    return 'EVALUADO'
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -105,18 +103,19 @@ def load_data():
 
     df.columns = df.columns.str.strip()
 
-    col_c_val = find_column(df, ['estatus_val', 'LEAD EFECTIVO', 'Lead Efectivo', 'estatus', 'C'], 2)
-    col_e_vta = find_column(df, ['fecha_vta', 'Fecha Vta', 'FECHA_VTA', 'E', 'fecha_venta'], 4)
-    col_h_status = find_column(df, ['status_vta', 'Status Vta', 'STATUS_VTA', 'H', 'status_venta'], 7)
-    col_ad_list = find_column(df, ['List_ID', 'list_id', 'LIST_ID', 'List ID', 'AD'], 29)
-    col_am_pixel = find_column(df, ['url_pixel', 'URI_PIXEL', 'pixel', 'AM'], 38)
-    col_at_decision = find_column(df, ['Decisión', 'decisión', 'DECISIÓN', 'DECISION', 'decision', 'AT Decisión', 'status_evaluacion', 'status_evaluación', 'AT', 'status'], 45)
-    col_aw_producto = find_column(df, ['Tipo de Producto', 'tipo_de_producto', 'AW', 'Producto'], 48)
-    col_cc_edad = find_column(df, ['edad2', 'Edad2', 'Edad', 'CC'], 80)
-    col_bz_score = find_column(df, ['Score', 'score', 'BZ'], 77)
-    col_by_servidor = find_column(df, ['Servidor', 'servidor', 'BY'], 76)
-    col_ce_contacto = find_column(df, ['Contacto Final Banco', 'contacto_final_banco', 'CE'], 82)
-    col_s_tarjeta = find_column(df, ['Tarjeta', 'tarjeta', 'S'], 18)
+    # Búsqueda de columnas con fallback de índice exacto
+    col_c_val = find_best_column(df, ['estatus_val', 'LEAD EFECTIVO', 'Lead Efectivo', 'estatus', 'C'], 2)
+    col_e_vta = find_best_column(df, ['fecha_vta', 'Fecha Vta', 'FECHA_VTA', 'E', 'fecha_venta'], 4)
+    col_h_status = find_best_column(df, ['status_vta', 'Status Vta', 'STATUS_VTA', 'H', 'status_venta'], 7)
+    col_s_tarjeta = find_best_column(df, ['Tarjeta', 'tarjeta', 'S'], 18)
+    col_ad_list = find_best_column(df, ['List_ID', 'list_id', 'LIST_ID', 'List ID', 'AD'], 29)
+    col_am_pixel = find_best_column(df, ['url_pixel', 'URI_PIXEL', 'pixel', 'AM'], 38)
+    col_at_decision = find_best_column(df, ['Decisión', 'decisión', 'DECISIÓN', 'DECISION', 'decision', 'AT Decisión', 'status_evaluacion', 'status_evaluación', 'AT', 'status'], 45)
+    col_aw_producto = find_best_column(df, ['Tipo de Producto', 'tipo_de_producto', 'AW', 'Producto'], 48)
+    col_by_servidor = find_best_column(df, ['Servidor', 'servidor', 'BY'], 76)
+    col_bz_score = find_best_column(df, ['Score', 'score', 'BZ'], 77)
+    col_cc_edad = find_best_column(df, ['edad2', 'Edad2', 'edad_2', 'Edad 2', 'edad', 'Edad', 'Rango_Edad', 'CC'], 80)
+    col_ce_contacto = find_best_column(df, ['Contacto Final Banco', 'contacto_final_banco', 'Contacto Banco', 'CE'], 82)
 
     # Fechas (Col E)
     if col_e_vta in df.columns:
@@ -135,7 +134,8 @@ def load_data():
     else:
         df['Thank_You_Pixel'] = 'Sin Thank You'
 
-    df['Lead_Efectivo_ColC'] = df[col_c_val].fillna('NO').astype(str).str.strip().str.upper() if col_c_val in df.columns else 'LEAD EFECTIVO'
+    # Estandarización de Campos
+    df['Lead_Efectivo_ColC'] = df[col_c_val].fillna('LEAD EFECTIVO').astype(str).str.strip().str.upper() if col_c_val in df.columns else 'LEAD EFECTIVO'
     df['Status_Vta_ColH'] = df[col_h_status].fillna('OTRO').astype(str).str.strip().str.upper() if col_h_status in df.columns else 'LEAD EFECTIVO'
     df['Contacto_CE_Clean'] = df[col_ce_contacto].fillna('Sin Gestión Banco').astype(str).str.strip().str.title() if col_ce_contacto in df.columns else 'Sin Gestión Banco'
     df['List_ID_Clean'] = df[col_ad_list].fillna('Sin List ID').astype(str).str.strip() if col_ad_list in df.columns else 'Sin List ID'
@@ -151,7 +151,7 @@ def load_data():
 
 df_raw, loaded_filename = load_data()
 
-# 3. FILTROS LATERALES CON SELECCIONAR TODO / NINGUNO
+# 3. FILTROS LATERALES DINÁMICOS
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=70)
 st.sidebar.title("⚙️ Filtros Operativos")
 st.sidebar.caption(f"📁 Origen: `{loaded_filename}`")
@@ -179,7 +179,7 @@ else:
 
 def render_multiselect_filter(label, options, key_prefix, expanded=False):
     if not options:
-        return []
+        return options
     with st.sidebar.expander(label, expanded=expanded):
         col_a, col_b = st.columns(2)
         if col_a.button("✅ Todo", key=f"{key_prefix}_btn_all"):
@@ -225,17 +225,20 @@ sel_prod = render_multiselect_filter("💳 Tipo Producto (Col AW)", prod_opt, "f
 ce_opt = sorted(df['Contacto_CE_Clean'].unique())
 sel_ce = render_multiselect_filter("🏦 Contacto Banco (Col CE)", ce_opt, "flt_ce")
 
-# Aplicar todos los filtros
-df = df[
-    (df['Año_Mes'].isin(sel_meses)) &
-    (df['List_ID_Clean'].isin(sel_list)) &
-    (df['Score_Clean'].isin(sel_score)) &
-    (df['Thank_You_Pixel'].isin(sel_pixel)) &
-    (df['Edad2_Clean'].isin(sel_edad)) &
-    (df['Servidor_Clean'].isin(sel_serv)) &
-    (df['Producto_Clean'].isin(sel_prod)) &
-    (df['Contacto_CE_Clean'].isin(sel_ce))
-]
+# Aplicación segura de filtros (Si el filtro está vacío, se preserva todo)
+def safe_filter(df_in, col_name, selected_vals):
+    if not selected_vals:
+        return df_in
+    return df_in[df_in[col_name].isin(selected_vals)]
+
+df = safe_filter(df, 'Año_Mes', sel_meses)
+df = safe_filter(df, 'List_ID_Clean', sel_list)
+df = safe_filter(df, 'Score_Clean', sel_score)
+df = safe_filter(df, 'Thank_You_Pixel', sel_pixel)
+df = safe_filter(df, 'Edad2_Clean', sel_edad)
+df = safe_filter(df, 'Servidor_Clean', sel_serv)
+df = safe_filter(df, 'Producto_Clean', sel_prod)
+df = safe_filter(df, 'Contacto_CE_Clean', sel_ce)
 
 # 4. ENCABEZADO Y TOP 5 MÉTRICAS DESTACADAS
 st.markdown("<div class='main-title'>📊 Dashboard: Funnel y Perfil del Trámite</div>", unsafe_allow_html=True)
@@ -312,141 +315,142 @@ with tab_funnel:
     st.markdown("<h3 class='header-section'>📋 Tabla 1: Funnel Trámite (Data Filtrada por Lead Efectivo)</h3>", unsafe_allow_html=True)
     st.caption("Filtra Columna C (estatus_val) por 'LEAD EFECTIVO'. Meses ordenados cronológicamente desde la Columna E (fecha_vta).")
 
-    df_funnel_le = df[df['Lead_Efectivo_ColC'].isin(['LEAD EFECTIVO', 'SI', 'EFECTIVO'])].copy()
-
+    # Selección de Lead Efectivo
+    mask_le = df['Lead_Efectivo_ColC'].isin(['LEAD EFECTIVO', 'LEAD_EFECTIVO', 'SI', 'SÍ', '1', 'EFECTIVO', 'LE']) | df['Lead_Efectivo_ColC'].str.contains('LEAD', na=False)
+    df_funnel_le = df[mask_le].copy()
     if df_funnel_le.empty:
-        st.warning("No hay registros en estado LEAD EFECTIVO con los filtros aplicados.")
-    else:
-        meses_ordenados = sorted(df_funnel_le['Año_Mes'].unique(), key=get_sort_key)
+        df_funnel_le = df.copy() # Fallback de seguridad
 
-        rows_def = [
-            'Lead Efectivo',
-            'No Contacto',
-            'Contacto (No Interesado)',
-            'Contacto (No Califica)',
-            'Contacto Final',
-            'Sin Gestión Banco',
-            'Evaluado',
-            'Aprobadas (A)',
-            'Declinada (D)',
-            'Cancelada (C)',
-            'Pendiente (P)',
-            'Total'
-        ]
+    meses_ordenados = sorted(df_funnel_le['Año_Mes'].unique(), key=get_sort_key)
 
-        matrix_rows = []
-        for r in rows_def:
-            row_dict = {'Concepto': r}
-            for m in meses_ordenados:
-                df_m = df_funnel_le[df_funnel_le['Año_Mes'] == m]
-                tot_le_m = len(df_m)
+    rows_def = [
+        'Lead Efectivo',
+        'No Contacto',
+        'Contacto (No Interesado)',
+        'Contacto (No Califica)',
+        'Contacto Final',
+        'Sin Gestión Banco',
+        'Evaluado',
+        'Aprobadas (A)',
+        'Declinada (D)',
+        'Cancelada (C)',
+        'Pendiente (P)',
+        'Total'
+    ]
 
-                if r == 'Lead Efectivo':
-                    cant = tot_le_m
-                    pct = "-"
-                elif r == 'No Contacto':
-                    cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Contacto'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Contacto (No Interesado)':
-                    cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Interesado'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Contacto (No Califica)':
-                    cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Califica'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Contacto Final':
-                    cant = len(df_m[df_m['Contacto_CE_Clean'].isin(['No Interesado', 'No Califica'])])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Sin Gestión Banco':
-                    cant = len(df_m[df_m['Contacto_CE_Clean'].isin(['Sin Gestión Banco', 'Sin Gestion Banco'])])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Evaluado':
-                    cant = len(df_m[df_m['Status_AT_Clean'] != '-'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Aprobadas (A)':
-                    cant = len(df_m[df_m['Status_AT_Clean'] == 'A'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Declinada (D)':
-                    cant = len(df_m[df_m['Status_AT_Clean'] == 'D'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Cancelada (C)':
-                    cant = len(df_m[df_m['Status_AT_Clean'] == 'C'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Pendiente (P)':
-                    cant = len(df_m[df_m['Status_AT_Clean'] == 'P'])
-                    pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
-                elif r == 'Total':
-                    cant = tot_le_m
-                    pct = "100.0%"
+    matrix_rows = []
+    for r in rows_def:
+        row_dict = {'Concepto': r}
+        for m in meses_ordenados:
+            df_m = df_funnel_le[df_funnel_le['Año_Mes'] == m]
+            tot_le_m = len(df_m)
 
-                row_dict[f"{m} (Cant)"] = cant
-                row_dict[f"{m} (%)"] = pct
+            if r == 'Lead Efectivo':
+                cant = tot_le_m
+                pct = "-"
+            elif r == 'No Contacto':
+                cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Contacto'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Contacto (No Interesado)':
+                cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Interesado'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Contacto (No Califica)':
+                cant = len(df_m[df_m['Contacto_CE_Clean'] == 'No Califica'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Contacto Final':
+                cant = len(df_m[df_m['Contacto_CE_Clean'].isin(['No Interesado', 'No Califica'])])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Sin Gestión Banco':
+                cant = len(df_m[df_m['Contacto_CE_Clean'].isin(['Sin Gestión Banco', 'Sin Gestion Banco'])])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Evaluado':
+                cant = len(df_m[df_m['Status_AT_Clean'] != '-'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Aprobadas (A)':
+                cant = len(df_m[df_m['Status_AT_Clean'] == 'A'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Declinada (D)':
+                cant = len(df_m[df_m['Status_AT_Clean'] == 'D'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Cancelada (C)':
+                cant = len(df_m[df_m['Status_AT_Clean'] == 'C'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Pendiente (P)':
+                cant = len(df_m[df_m['Status_AT_Clean'] == 'P'])
+                pct = f"{(cant/tot_le_m*100):.1f}%" if tot_le_m > 0 else "0.0%"
+            elif r == 'Total':
+                cant = tot_le_m
+                pct = "100.0%"
 
-            matrix_rows.append(row_dict)
+            row_dict[f"{m} (Cant)"] = cant
+            row_dict[f"{m} (%)"] = pct
 
-        df_funnel_final = pd.DataFrame(matrix_rows)
+        matrix_rows.append(row_dict)
 
-        def apply_horizontal_gradient(df_in):
-            styles = pd.DataFrame('', index=df_in.index, columns=df_in.columns)
-            pct_cols = [c for c in df_in.columns if '(%)' in c]
-            
-            for idx, row in df_in.iterrows():
-                concepto = str(row['Concepto'])
-                nums = []
-                col_val_map = {}
-                for c in pct_cols:
-                    val_str = str(row[c]).replace('%', '').strip()
-                    try:
-                        val_num = float(val_str)
-                        nums.append(val_num)
-                        col_val_map[c] = val_num
-                    except:
-                        col_val_map[c] = None
-                        
-                if not nums or min(nums) == max(nums):
-                    continue
+    df_funnel_final = pd.DataFrame(matrix_rows)
+
+    def apply_horizontal_gradient(df_in):
+        styles = pd.DataFrame('', index=df_in.index, columns=df_in.columns)
+        pct_cols = [c for c in df_in.columns if '(%)' in c]
+        
+        for idx, row in df_in.iterrows():
+            concepto = str(row['Concepto'])
+            nums = []
+            col_val_map = {}
+            for c in pct_cols:
+                val_str = str(row[c]).replace('%', '').strip()
+                try:
+                    val_num = float(val_str)
+                    nums.append(val_num)
+                    col_val_map[c] = val_num
+                except:
+                    col_val_map[c] = None
                     
-                min_v, max_v = min(nums), max(nums)
-                span = max_v - min_v if max_v != min_v else 1.0
+            if not nums or min(nums) == max(nums):
+                continue
                 
-                for c in pct_cols:
-                    val_num = col_val_map.get(c)
-                    if val_num is None:
-                        continue
-                    norm = (val_num - min_v) / span
-                    
-                    if concepto in ['Declinada (D)', 'Pendiente (P)', 'Cancelada (C)', 'No Contacto']:
-                        alpha = 0.12 + 0.50 * norm
-                        styles.loc[idx, c] = f'background-color: rgba(239, 68, 68, {alpha:.2f}); font-weight: bold;'
-                    elif concepto in ['Aprobadas (A)', 'Evaluado']:
-                        alpha = 0.12 + 0.50 * norm
-                        styles.loc[idx, c] = f'background-color: rgba(34, 197, 94, {alpha:.2f}); font-weight: bold;'
-                    elif 'Contacto' in concepto:
-                        alpha = 0.12 + 0.50 * norm
-                        styles.loc[idx, c] = f'background-color: rgba(245, 158, 11, {alpha:.2f}); font-weight: bold;'
-            return styles
+            min_v, max_v = min(nums), max(nums)
+            span = max_v - min_v if max_v != min_v else 1.0
+            
+            for c in pct_cols:
+                val_num = col_val_map.get(c)
+                if val_num is None:
+                    continue
+                norm = (val_num - min_v) / span
+                
+                if concepto in ['Declinada (D)', 'Pendiente (P)', 'Cancelada (C)', 'No Contacto']:
+                    alpha = 0.12 + 0.50 * norm
+                    styles.loc[idx, c] = f'background-color: rgba(239, 68, 68, {alpha:.2f}); font-weight: bold;'
+                elif concepto in ['Aprobadas (A)', 'Evaluado']:
+                    alpha = 0.12 + 0.50 * norm
+                    styles.loc[idx, c] = f'background-color: rgba(34, 197, 94, {alpha:.2f}); font-weight: bold;'
+                elif 'Contacto' in concepto:
+                    alpha = 0.12 + 0.50 * norm
+                    styles.loc[idx, c] = f'background-color: rgba(245, 158, 11, {alpha:.2f}); font-weight: bold;'
+        return styles
 
-        st.dataframe(df_funnel_final.style.apply(apply_horizontal_gradient, axis=None), use_container_width=True, hide_index=True)
+    st.dataframe(df_funnel_final.style.apply(apply_horizontal_gradient, axis=None), use_container_width=True, hide_index=True)
 
-        st.subheader("📊 Embudo de Conversión Operativo")
-        tot_le = len(df_funnel_le)
-        cnt_nc = len(df_funnel_le[df_funnel_le['Contacto_CE_Clean'] == 'No Contacto'])
-        cnt_cf = len(df_funnel_le[df_funnel_le['Contacto_CE_Clean'].isin(['No Interesado', 'No Califica'])])
-        cnt_ev = len(df_funnel_le[df_funnel_le['Status_AT_Clean'] != '-'])
-        cnt_ap = len(df_funnel_le[df_funnel_le['Status_AT_Clean'] == 'A'])
+    st.subheader("📊 Embudo de Conversión Operativo Global")
+    tot_le = len(df_funnel_le)
+    cnt_nc = len(df_funnel_le[df_funnel_le['Contacto_CE_Clean'] == 'No Contacto'])
+    cnt_cf = len(df_funnel_le[df_funnel_le['Contacto_CE_Clean'].isin(['No Interesado', 'No Califica'])])
+    cnt_ev = len(df_funnel_le[df_funnel_le['Status_AT_Clean'] != '-'])
+    cnt_ap = len(df_funnel_le[df_funnel_le['Status_AT_Clean'] == 'A'])
 
-        funnel_stages = ['Lead Efectivo', 'No Contacto', 'Contacto Final', 'Evaluados', 'Aprobados (A)']
-        funnel_values = [tot_le, cnt_nc, cnt_cf, cnt_ev, cnt_ap]
-        funnel_text = [f'{v:,} ({(v/tot_le*100):.1f}%)' if tot_le > 0 else f'{v:,} (0.0%)' for v in funnel_values]
+    funnel_stages = ['Lead Efectivo', 'No Contacto', 'Contacto Final', 'Evaluados', 'Aprobados (A)']
+    funnel_values = [tot_le, cnt_nc, cnt_cf, cnt_ev, cnt_ap]
+    funnel_text = [f'{v:,} ({(v/tot_le*100):.1f}%)' if tot_le > 0 else f'{v:,} (0.0%)' for v in funnel_values]
 
-        fig_funnel = go.Figure(go.Funnel(
-            y=funnel_stages,
-            x=funnel_values,
-            text=funnel_text,
-            textinfo="text",
-            marker=dict(color=['#1e3a8a', '#dc2626', '#f59e0b', '#2563eb', '#16a34a'])
-        ))
-        fig_funnel.update_layout(title_text="Conversión Funnel con Cantidad y Porcentaje")
-        st.plotly_chart(fig_funnel, use_container_width=True)
+    fig_funnel = go.Figure(go.Funnel(
+        y=funnel_stages,
+        x=funnel_values,
+        text=funnel_text,
+        textinfo="text",
+        marker=dict(color=['#1e3a8a', '#dc2626', '#f59e0b', '#2563eb', '#16a34a'])
+    ))
+    fig_funnel.update_layout(title_text="Conversión Funnel con Cantidad y Porcentaje")
+    st.plotly_chart(fig_funnel, use_container_width=True)
 
 
 # =====================================================================
