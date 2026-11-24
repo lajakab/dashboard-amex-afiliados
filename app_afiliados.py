@@ -4252,7 +4252,46 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     df_m5 = df_base_m5.copy()
 
-    # 2. MAPEO DE MESES DE ESPAÑOL Y ORDENAMIENTO CHRONOLÓGICO
+    # 2. FUNCIONES DE EXTRACCIÓN Y LIMPIEZA BLINDADAS (EVITA TYPEERROR Y KEYERROR)
+    def find_col(df_in, candidates, fallback_keywords=None):
+        if df_in is None or df_in.empty:
+            return None
+        for c in candidates:
+            if c in df_in.columns:
+                return c
+        cols_lower = {str(col).strip().lower(): col for col in df_in.columns}
+        for c in candidates:
+            cl = str(c).strip().lower()
+            if cl in cols_lower:
+                return cols_lower[cl]
+        if fallback_keywords:
+            for col in df_in.columns:
+                cl = str(col).lower()
+                if any(k in cl for k in fallback_keywords):
+                    return col
+        return None
+
+    def get_clean_series(df_in, col_name, default_val="Sin Datos"):
+        if col_name is None or col_name not in df_in.columns:
+            return pd.Series([default_val] * len(df_in), index=df_in.index)
+        val = df_in[col_name]
+        if isinstance(val, pd.DataFrame):
+            val = val.iloc[:, 0]
+        return val
+
+    def get_clean_unique_list(series, sort_key=None):
+        raw_vals = series.dropna().astype(str).str.strip()
+        clean_vals = list(dict.fromkeys([v for v in raw_vals if v and v.lower() not in ['nan', 'none', 'null', '']]))
+        if not clean_vals:
+            return ["Sin Datos"]
+        if sort_key:
+            try:
+                return sorted(clean_vals, key=sort_key)
+            except Exception:
+                return sorted(clean_vals)
+        return sorted(clean_vals)
+
+    # 3. MAPEO DE MESES DE ESPAÑOL Y ORDENAMIENTO CRONOLÓGICO
     meses_es = {
         1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio',
         7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
@@ -4269,15 +4308,8 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
             pass
         return (0, 0)
 
-    # 3. AUTODETECTOR OPTIMIZADO DE COLUMNAS CLAVE
-    # A) Columna de Mes (Garantiza "Mes Año" en lugar de timestamps)
-    c_mes = None
-    mes_candidates = ['Año_Mes', 'ano_mes', 'Mes', 'mes', 'Año Mes', 'Ano_Mes', 'Mes_Venta']
-    for c in mes_candidates:
-        if c in df_m5.columns:
-            c_mes = c
-            break
-
+    # 4. IDENTIFICACIÓN DE COLUMNAS PRINCIPALES
+    c_mes = find_col(df_m5, ['Año_Mes', 'ano_mes', 'Mes', 'mes', 'Año Mes', 'Ano_Mes', 'Mes_Venta'], ['año_mes', 'ano_mes'])
     if not c_mes or pd.api.types.is_datetime64_any_dtype(df_m5[c_mes]) or ' ' not in str(df_m5[c_mes].iloc[0]):
         if 'fecha_vta_dt' in df_m5.columns:
             dt_col = df_m5['fecha_vta_dt']
@@ -4289,102 +4321,62 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         df_m5['Año_Mes_Clean'] = dt_col.dt.month.map(meses_es) + " " + dt_col.dt.year.astype(str)
         c_mes = 'Año_Mes_Clean'
 
-    # B) Columna de Asesor
-    c_asesor = None
-    asesor_candidates = [
-        'Nombre_Asesor', 'Asesor', 'asesor', 'ASESOR', 'Nombre Asesor', 'Nom_Asesor', 
-        'asesor_clean', 'Asesor_Clean', 'Agente', 'AGENTE', 'agente', 'agente_nombre', 
-        'Usuario', 'USUARIO', 'usuario', 'usuario_vta', 'Vendedor', 'vendedor', 
-        'EJECUTIVO', 'Ejecutivo', 'ejecutivo', 'nombre', 'Nombre', 'NOMBRE'
-    ]
-    for c in asesor_candidates:
-        if c in df_m5.columns:
-            c_asesor = c
-            break
-    if not c_asesor:
-        for col in df_m5.columns:
-            cl = str(col).lower()
-            if any(k in cl for k in ['asesor', 'agente', 'usuario', 'vendedor', 'ejecutivo', 'nombre']):
-                c_asesor = col
-                break
-    if not c_asesor:
-        df_m5['Asesor_Consolidado'] = 'Asesor General'
-        c_asesor = 'Asesor_Consolidado'
+    c_asesor = find_col(df_m5, ['Nombre_Asesor', 'Asesor', 'asesor', 'ASESOR', 'Nombre Asesor', 'Nom_Asesor', 'Agente', 'Usuario', 'Vendedor', 'Ejecutivo', 'Nombre'], ['asesor', 'agente', 'vendedor', 'usuario', 'ejecutivo'])
+    c_sup = find_col(df_m5, ['Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'Nombre Supervisor', 'Nom_Supervisor', 'sup_clean', 'sup_nombre', 'Sup', 'SUP', 'Coordinador', 'Team Leader', 'Lider', 'Líder', 'Jefe'], ['superv', 'coordinad', 'lider', 'jefe'])
 
-    # C) Columna de Supervisor
-    c_sup = None
-    sup_candidates = [
-        'Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'Nombre Supervisor', 
-        'Nom_Supervisor', 'sup_clean', 'sup_nombre', 'Sup', 'SUP', 'Coordinador', 'COORDINADOR', 
-        'Team Leader', 'Lider', 'Líder', 'Jefe', 'JEFE', 'Servidor_Clean', 'Servidor', 'BY'
-    ]
-    for c in sup_candidates:
-        if c in df_m5.columns:
-            c_sup = c
-            break
-    if not c_sup:
-        for col in df_m5.columns:
-            cl = str(col).lower()
-            if any(k in cl for k in ['superv', 'coordinad', 'lider', 'jefe', 'sup']):
-                c_sup = col
-                break
-    if not c_sup:
-        df_m5['Supervisor_Consolidado'] = 'Operación AMEX'
-        c_sup = 'Supervisor_Consolidado'
+    s_mes_raw = get_clean_series(df_m5, c_mes, default_val="Sin Mes")
+    s_ase_raw = get_clean_series(df_m5, c_asesor, default_val="Asesor General")
+    s_sup_raw = get_clean_series(df_m5, c_sup, default_val="Operación AMEX")
 
-    # 4. NORMALIZACIÓN VECTORIZADA RÁPIDA DE MÉTRICAS (SIN BUCLES RUNTIME)
-    def find_first_col(df_in, candidates):
-        for c in candidates:
-            if c in df_in.columns:
-                return c
-        return None
+    df_m5['_Mes_Clean'] = s_mes_raw.astype(str).str.strip()
+    df_m5['_Asesor_Clean'] = s_ase_raw.astype(str).str.strip()
+    df_m5['_Supervisor_Clean'] = s_sup_raw.astype(str).str.strip()
 
-    c_le_raw = find_first_col(df_m5, ['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC', 'estatus_val', 'status_vta', 'C', 'H'])
-    c_ap_raw = find_first_col(df_m5, ['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión', 'decisión', 'DECISION', 'AT'])
-    c_trm_raw = find_first_col(df_m5, ['Tramites', 'tramites', 'TRM', 'Total_Tramites', 'tramite'])
-    c_llam_raw = find_first_col(df_m5, ['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas', 'llamada'])
-    c_pts_raw = find_first_col(df_m5, ['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion', 'Puntos_Gestion', 'PUNTO'])
-    c_hprog_raw = find_first_col(df_m5, ['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'])
-    c_hlog_raw = find_first_col(df_m5, ['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'])
-    c_haus_raw = find_first_col(df_m5, ['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'])
+    # 5. NORMALIZACIÓN VECTORIZADA RÁPIDA DE MÉTRICAS
+    c_le_raw = find_col(df_m5, ['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC', 'estatus_val', 'status_vta', 'C', 'H'])
+    c_ap_raw = find_col(df_m5, ['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión', 'decisión', 'DECISION', 'AT'])
+    c_trm_raw = find_col(df_m5, ['Tramites', 'tramites', 'TRM', 'Total_Tramites', 'tramite'])
+    c_llam_raw = find_col(df_m5, ['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas', 'llamada'])
+    c_pts_raw = find_col(df_m5, ['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion', 'Puntos_Gestion', 'PUNTO'])
+    c_hprog_raw = find_col(df_m5, ['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'])
+    c_hlog_raw = find_col(df_m5, ['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'])
+    c_haus_raw = find_col(df_m5, ['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'])
 
-    # LE vectorizado
-    if c_le_raw and pd.api.types.is_numeric_dtype(df_m5[c_le_raw]):
-        df_m5['LE_Num'] = pd.to_numeric(df_m5[c_le_raw], errors='coerce').fillna(0)
-    elif c_le_raw:
-        df_m5['LE_Num'] = df_m5[c_le_raw].astype(str).str.upper().str.contains('LEAD|SI|SÍ|EFECTIVO|1', na=False).astype(int)
+    s_le_col = get_clean_series(df_m5, c_le_raw, default_val="1")
+    s_ap_col = get_clean_series(df_m5, c_ap_raw, default_val="0")
+
+    if pd.api.types.is_numeric_dtype(s_le_col):
+        df_m5['LE_Num'] = pd.to_numeric(s_le_col, errors='coerce').fillna(0)
     else:
-        df_m5['LE_Num'] = 1
+        df_m5['LE_Num'] = s_le_col.astype(str).str.upper().str.contains('LEAD|SI|SÍ|EFECTIVO|1', na=False).astype(int)
 
-    # AP vectorizado
-    if c_ap_raw and pd.api.types.is_numeric_dtype(df_m5[c_ap_raw]):
-        df_m5['AP_Num'] = pd.to_numeric(df_m5[c_ap_raw], errors='coerce').fillna(0)
-    elif c_ap_raw:
-        df_m5['AP_Num'] = (df_m5[c_ap_raw].astype(str).str.strip().str.upper() == 'A').astype(int)
+    if pd.api.types.is_numeric_dtype(s_ap_col):
+        df_m5['AP_Num'] = pd.to_numeric(s_ap_col, errors='coerce').fillna(0)
     else:
-        df_m5['AP_Num'] = 0
+        df_m5['AP_Num'] = (s_ap_col.astype(str).str.strip().str.upper() == 'A').astype(int)
 
-    # Trámites y Llamadas
-    df_m5['TRM_Num'] = pd.to_numeric(df_m5[c_trm_raw], errors='coerce').fillna(1) if c_trm_raw and pd.api.types.is_numeric_dtype(df_m5[c_trm_raw]) else 1
-    df_m5['LLAM_Num'] = pd.to_numeric(df_m5[c_llam_raw], errors='coerce').fillna(1) if c_llam_raw and pd.api.types.is_numeric_dtype(df_m5[c_llam_raw]) else df_m5['TRM_Num']
+    s_trm = get_clean_series(df_m5, c_trm_raw, default_val="1")
+    s_llam = get_clean_series(df_m5, c_llam_raw, default_val="1")
+    s_pts = get_clean_series(df_m5, c_pts_raw, default_val="0")
 
-    # Puntos
-    if c_pts_raw and pd.api.types.is_numeric_dtype(df_m5[c_pts_raw]):
-        df_m5['PTS_Num'] = pd.to_numeric(df_m5[c_pts_raw], errors='coerce').fillna(0)
+    df_m5['TRM_Num'] = pd.to_numeric(s_trm, errors='coerce').fillna(1)
+    df_m5['LLAM_Num'] = pd.to_numeric(s_llam, errors='coerce').fillna(1)
+
+    if pd.api.types.is_numeric_dtype(s_pts):
+        df_m5['PTS_Num'] = pd.to_numeric(s_pts, errors='coerce').fillna(0)
     else:
         df_m5['PTS_Num'] = (df_m5['AP_Num'] * 10) + (df_m5['LE_Num'] * 2)
 
-    # Horas Programadas, Logueadas y Ausentismo
-    df_m5['HPROG_Num'] = pd.to_numeric(df_m5[c_hprog_raw], errors='coerce').fillna(0) if c_hprog_raw and pd.api.types.is_numeric_dtype(df_m5[c_hprog_raw]) else 0.0
-    df_m5['HLOG_Num'] = pd.to_numeric(df_m5[c_hlog_raw], errors='coerce').fillna(0) if c_hlog_raw and pd.api.types.is_numeric_dtype(df_m5[c_hlog_raw]) else 0.0
-    df_m5['HAUS_Num'] = pd.to_numeric(df_m5[c_haus_raw], errors='coerce').fillna(0) if c_haus_raw and pd.api.types.is_numeric_dtype(df_m5[c_haus_raw]) else 0.0
+    df_m5['HPROG_Num'] = pd.to_numeric(get_clean_series(df_m5, c_hprog_raw, default_val="0"), errors='coerce').fillna(0)
+    df_m5['HLOG_Num'] = pd.to_numeric(get_clean_series(df_m5, c_hlog_raw, default_val="0"), errors='coerce').fillna(0)
+    df_m5['HAUS_Num'] = pd.to_numeric(get_clean_series(df_m5, c_haus_raw, default_val="0"), errors='coerce').fillna(0)
 
-    # 5. FILTROS RÁPIDOS EN PANTALLA
+    # 6. FILTROS RÁPIDOS EN PANTALLA
     st.markdown("<h3 class='header-section'>⚙️ Filtros de Selección Multi-Mes y Segmentación</h3>", unsafe_allow_html=True)
     col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
 
-    meses_disponibles = sorted(df_m5[c_mes].astype(str).str.strip().unique().tolist(), key=get_sort_key)
-    supervisores_disponibles = sorted(df_m5[c_sup].astype(str).str.strip().unique().tolist())
+    meses_disponibles = get_clean_unique_list(df_m5['_Mes_Clean'], sort_key=get_sort_key)
+    supervisores_disponibles = get_clean_unique_list(df_m5['_Supervisor_Clean'])
 
     with col_f1:
         sel_meses_m5 = st.multiselect(
@@ -4408,20 +4400,20 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         st.warning("⚠️ Debes seleccionar al menos un mes para calcular los promedios.")
         st.stop()
 
-    # Filtrado Ultra-Rápido Vectorizado mediante .isin()
-    mask_mes = df_m5[c_mes].astype(str).str.strip().isin(sel_meses_m5)
-    mask_sup = df_m5[c_sup].astype(str).str.strip().isin(sel_sup_m5) if sel_sup_m5 else True
+    # Filtrado Vectorizado Optimizado
+    mask_mes = df_m5['_Mes_Clean'].isin(sel_meses_m5)
+    mask_sup = df_m5['_Supervisor_Clean'].isin(sel_sup_m5) if sel_sup_m5 else True
 
     df_filtered_m5 = df_m5[mask_mes & mask_sup].copy()
 
     if search_asesor.strip() != "":
-        df_filtered_m5 = df_filtered_m5[df_filtered_m5[c_asesor].astype(str).str.contains(search_asesor, case=False, na=False)]
+        df_filtered_m5 = df_filtered_m5[df_filtered_m5['_Asesor_Clean'].str.contains(search_asesor, case=False, na=False)]
 
     if df_filtered_m5.empty:
         st.info("No se encontraron registros de asesores para los filtros aplicados.")
         st.stop()
 
-    # 6. CONSOLIDACIÓN DE MESES ACTIVOS Y PROMEDIOS POR ASESOR
+    # 7. CONSOLIDACIÓN DE MESES ACTIVOS Y PROMEDIOS POR ASESOR
     df_filtered_m5['Es_Mes_Activo'] = (
         (df_filtered_m5['LE_Num'] > 0) | 
         (df_filtered_m5['TRM_Num'] > 0) | 
@@ -4429,10 +4421,10 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     )
 
     df_activos = df_filtered_m5[df_filtered_m5['Es_Mes_Activo']]
-    mapa_meses_activos = df_activos.groupby(c_asesor)[c_mes].nunique().to_dict()
+    mapa_meses_activos = df_activos.groupby('_Asesor_Clean')['_Mes_Clean'].nunique().to_dict()
 
-    resumen_asesor = df_filtered_m5.groupby(c_asesor).agg(
-        Supervisor=(c_sup, 'last'),
+    resumen_asesor = df_filtered_m5.groupby('_Asesor_Clean').agg(
+        Supervisor=('_Supervisor_Clean', 'last'),
         Total_LE=('LE_Num', 'sum'),
         Total_Tramites=('TRM_Num', 'sum'),
         Total_Llamadas=('LLAM_Num', 'sum'),
@@ -4443,7 +4435,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         Horas_Aus=('HAUS_Num', 'sum')
     ).reset_index()
 
-    resumen_asesor['Meses_Activos'] = resumen_asesor[c_asesor].map(mapa_meses_activos).fillna(0).astype(int)
+    resumen_asesor['Meses_Activos'] = resumen_asesor['_Asesor_Clean'].map(mapa_meses_activos).fillna(0).astype(int)
     resumen_asesor['Meses_Activos_Denom'] = resumen_asesor['Meses_Activos'].clip(lower=1)
 
     resumen_asesor['Prom_LE_Mes'] = (resumen_asesor['Total_LE'] / resumen_asesor['Meses_Activos_Denom']).round(1)
@@ -4483,7 +4475,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     resumen_asesor['Cuartil_Puntos'] = asignar_cuartil(resumen_asesor['Prom_Puntos_Mes'])
 
     resumen_asesor.rename(columns={
-        c_asesor: 'Asesor',
+        '_Asesor_Clean': 'Asesor',
         'Total_LE': 'Total LE',
         'Total_Tramites': 'Total Trámites',
         'Total_Llamadas': 'Total Llamadas',
@@ -4494,7 +4486,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         'Horas_Aus': 'Horas Ausentismo'
     }, inplace=True)
 
-    # 7. TARJETAS SUPERIORES DE KPIS OPERATIVOS
+    # 8. TARJETAS SUPERIORES DE KPIS OPERATIVOS
     tot_asesores_eval = len(resumen_asesor)
     prom_op_le = resumen_asesor['Prom_LE_Mes'].mean() if tot_asesores_eval > 0 else 0.0
     prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean() if tot_asesores_eval > 0 else 0.0
@@ -4512,7 +4504,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 8. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI)
+    # 9. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI)
     st.markdown("<h3 class='header-section'>⚠️ Secciones de Alertas: Top 10 Asesores Más Bajos por Indicador</h3>", unsafe_allow_html=True)
 
     cols_export_alert = [
@@ -4561,7 +4553,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 9. TABLA CONSOLIDADA GENERAL
+    # 10. TABLA CONSOLIDADA GENERAL
     st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General por Asesor</h3>", unsafe_allow_html=True)
     st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
 
@@ -4573,7 +4565,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         hide_index=True
     )
 
-    # 10. MATRIZ VISUAL DE CUARTILES (PLOTLY)
+    # 11. MATRIZ VISUAL DE CUARTILES (PLOTLY)
     st.markdown("<h3 class='header-section'>📊 Matriz Visual: Cuartiles y Distribución de Desempeño</h3>", unsafe_allow_html=True)
 
     col_g1, col_g2 = st.columns(2)
