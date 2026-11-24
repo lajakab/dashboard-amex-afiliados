@@ -4224,6 +4224,11 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
 # MÓDULO 5: PROMEDIO GENERAL DEL ASESOR (CONSOLIDADO MULTI-MES)
 # =====================================================================
 elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
+    import pandas as pd
+    import numpy as np
+    import plotly.express as px
+    import plotly.graph_objects as go
+
     st.markdown("<div class='main-title'>👤 Módulo 5: Promedio General del Asesor</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='sub-title'>Consolidado histórico por asesor con promedios ajustados según meses de vinculación/actividad efectiva, "
@@ -4231,13 +4236,13 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         unsafe_allow_html=True
     )
 
-    # 1. DETECCIÓN AUTOMÁTICA DEL DATAFRAME PRINCIPAL Y COLUMNAS
+    # 1. DETECCIÓN AUTOMÁTICA DEL DATAFRAME PRINCIPAL
     df_base_m5 = None
     for posible_df in ['df', 'df_raw', 'df_afiliados', 'df_base', 'data', 'df_ventas']:
-        if posible_df in locals():
+        if posible_df in locals() and isinstance(locals()[posible_df], pd.DataFrame):
             df_base_m5 = locals()[posible_df]
             break
-        elif posible_df in globals():
+        elif posible_df in globals() and isinstance(globals()[posible_df], pd.DataFrame):
             df_base_m5 = globals()[posible_df]
             break
 
@@ -4245,67 +4250,165 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         st.error("⚠️ No se encontró la base de datos principal cargada en la memoria.")
         st.stop()
 
-    def find_col(candidates, default_name):
+    df_m5 = df_base_m5.copy()
+
+    # 2. AUTODETECTOR RIGUROSO DE COLUMNAS
+    # A) Asesor
+    def detect_asesor_col(df_in):
+        candidates = [
+            'Asesor', 'asesor', 'ASESOR', 'Nombre_Asesor', 'Nombre Asesor', 'Nom_Asesor', 
+            'asesor_clean', 'Agente', 'AGENTE', 'agente', 'agente_nombre', 'Nombre_Agente',
+            'Usuario', 'USUARIO', 'usuario', 'usuario_vta', 'Vendedor', 'vendedor', 
+            'EJECUTIVO', 'Ejecutivo', 'ejecutivo', 'nombre', 'Nombre', 'NOMBRE', 'login', 'LOGIN'
+        ]
         for c in candidates:
-            if c in df_base_m5.columns:
+            if c in df_in.columns:
                 return c
-        cols_lower = {str(col).strip().lower(): col for col in df_base_m5.columns}
+        cols_lower = {str(col).strip().lower(): col for col in df_in.columns}
         for c in candidates:
             cl = str(c).strip().lower()
             if cl in cols_lower:
                 return cols_lower[cl]
-        return default_name
+        for col in df_in.columns:
+            cl = str(col).lower()
+            if any(k in cl for k in ['asesor', 'agente', 'usuario', 'vendedor', 'ejecutivo', 'nombre']):
+                return col
+        for col in df_in.columns:
+            if df_in[col].dtype == 'object' and col not in ['estatus_val', 'status_vta', 'url_pixel', 'Decisión', 'Servidor', 'BY']:
+                return col
+        return None
 
-    c_asesor = find_col(['Asesor', 'asesor', 'Nombre_Asesor', 'asesor_clean', 'Nom_Asesor', 'asesor_nombre'], 'Asesor')
-    c_sup = find_col(['Supervisor', 'supervisor', 'Nombre_Supervisor', 'Servidor_Clean', 'sup_nombre', 'BY', 'Servidor'], 'Supervisor')
-    c_mes = find_col(['Año_Mes', 'ano_mes', 'Mes', 'mes_venta', 'fecha_vta_clean', 'Año Mes'], 'Año_Mes')
-    c_le = find_col(['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC'], 'LE')
-    c_trm = find_col(['Tramites', 'tramites', 'TRM', 'Total_Tramites'], 'Tramites')
-    c_llam = find_col(['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas'], 'Llamadas')
-    c_ap = find_col(['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión'], 'AP')
-    c_pts = find_col(['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion'], 'Puntos')
-    c_hprog = find_col(['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'], 'Horas_Prog')
-    c_hlog = find_col(['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'], 'Horas_Log')
-    c_haus = find_col(['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'], 'Horas_Aus')
+    c_asesor = detect_asesor_col(df_m5)
+    if c_asesor is None:
+        df_m5['Asesor_Consolidado'] = 'Asesor General'
+        c_asesor = 'Asesor_Consolidado'
 
-    # Garantizar la existencia de columnas clave (evita KeyError si no existen en el dataset)
-    df_m5 = df_base_m5.copy()
+    # B) Supervisor (Estricto: NUNCA Servidor / BY / AMEX3,4,5)
+    def detect_supervisor_col(df_in):
+        candidates = [
+            'Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'Nombre Supervisor', 
+            'Nom_Supervisor', 'sup_clean', 'Sup', 'SUP', 'Coordinador', 'COORDINADOR', 
+            'Team Leader', 'Lider', 'Líder', 'Jefe', 'JEFE'
+        ]
+        for c in candidates:
+            if c in df_in.columns:
+                return c
+        cols_lower = {str(col).strip().lower(): col for col in df_in.columns}
+        for c in candidates:
+            cl = str(c).strip().lower()
+            if cl in cols_lower:
+                return cols_lower[cl]
+        for col in df_in.columns:
+            cl = str(col).lower()
+            if any(k in cl for k in ['supervisor', 'coordinador', 'team_leader', 'lider', 'jefe']) and not any(k in cl for k in ['servidor', 'by', 'pixel', 'list']):
+                return col
+        return None
 
-    if c_sup not in df_m5.columns:
-        df_m5[c_sup] = 'Sin Supervisor'
-    if c_asesor not in df_m5.columns:
-        df_m5[c_asesor] = 'Sin Asesor'
-    if c_mes not in df_m5.columns:
-        df_m5[c_mes] = 'Sin Mes'
+    c_sup = detect_supervisor_col(df_m5)
+    if c_sup is None:
+        df_m5['Supervisor_Consolidado'] = 'Operación AMEX'
+        c_sup = 'Supervisor_Consolidado'
 
-    # Normalizar valores numéricos si la columna AT contiene letras ('A') en lugar de conteos
-    if c_ap in df_m5.columns and df_m5[c_ap].dtype == 'object':
-        df_m5['AP_Num'] = (df_m5[c_ap] == 'A').astype(int)
-        c_ap = 'AP_Num'
+    # C) Mes
+    def detect_mes_col(df_in):
+        candidates = [
+            'Año_Mes', 'ano_mes', 'Mes', 'mes', 'Año Mes', 'Ano_Mes', 'fecha_vta_clean', 
+            'fecha_vta', 'Fecha Vta', 'FECHA_VTA', 'mes_venta', 'Mes_Venta'
+        ]
+        for c in candidates:
+            if c in df_in.columns:
+                return c
+        cols_lower = {str(col).strip().lower(): col for col in df_in.columns}
+        for c in candidates:
+            cl = str(c).strip().lower()
+            if cl in cols_lower:
+                return cols_lower[cl]
+        return None
 
-    for col_req in [c_le, c_trm, c_llam, c_ap, c_pts, c_hprog, c_hlog, c_haus]:
-        if col_req not in df_m5.columns:
-            df_m5[col_req] = 0
+    c_mes = detect_mes_col(df_m5)
+    if c_mes is None:
+        if 'fecha_vta_dt' in df_m5.columns:
+            meses_es = {1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio',
+                        7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'}
+            df_m5['Año_Mes'] = df_m5['fecha_vta_dt'].dt.month.map(meses_es) + " " + df_m5['fecha_vta_dt'].dt.year.astype(str)
+            c_mes = 'Año_Mes'
         else:
-            df_m5[col_req] = pd.to_numeric(df_m5[col_req], errors='coerce').fillna(0)
+            df_m5['Año_Mes'] = 'Sin Mes'
+            c_mes = 'Año_Mes'
 
-    # 2. FILTROS INTERNOS DEL MÓDULO 5
+    # 3. PROCESAMIENTO ESTANDARIZADO DE MÉTRICAS (LE, AP, TRM, LLAM, PTS, HORAS)
+    def find_any_col(df_in, candidates):
+        for c in candidates:
+            if c in df_in.columns:
+                return c
+        return None
+
+    c_le_raw = find_any_col(df_m5, ['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC', 'estatus_val', 'status_vta', 'C', 'H'])
+    c_ap_raw = find_any_col(df_m5, ['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión', 'decisión', 'DECISION', 'AT'])
+    c_trm_raw = find_any_col(df_m5, ['Tramites', 'tramites', 'TRM', 'Total_Tramites', 'tramite'])
+    c_llam_raw = find_any_col(df_m5, ['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas', 'llamada'])
+    c_pts_raw = find_any_col(df_m5, ['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion', 'Puntos_Gestion', 'PUNTO'])
+    c_hprog_raw = find_any_col(df_m5, ['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'])
+    c_hlog_raw = find_any_col(df_m5, ['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'])
+    c_haus_raw = find_any_col(df_m5, ['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'])
+
+    # LE
+    if c_le_raw and pd.api.types.is_numeric_dtype(df_m5[c_le_raw]):
+        df_m5['LE_Num'] = pd.to_numeric(df_m5[c_le_raw], errors='coerce').fillna(0)
+    elif c_le_raw:
+        df_m5['LE_Num'] = df_m5[c_le_raw].astype(str).str.upper().str.contains('LEAD|SI|SÍ|EFECTIVO|1', na=False).astype(int)
+    else:
+        df_m5['LE_Num'] = 1
+
+    # AP
+    if c_ap_raw and pd.api.types.is_numeric_dtype(df_m5[c_ap_raw]):
+        df_m5['AP_Num'] = pd.to_numeric(df_m5[c_ap_raw], errors='coerce').fillna(0)
+    elif c_ap_raw:
+        df_m5['AP_Num'] = (df_m5[c_ap_raw].astype(str).str.strip().str.upper() == 'A').astype(int)
+    else:
+        df_m5['AP_Num'] = 0
+
+    # Trámites
+    if c_trm_raw and pd.api.types.is_numeric_dtype(df_m5[c_trm_raw]):
+        df_m5['TRM_Num'] = pd.to_numeric(df_m5[c_trm_raw], errors='coerce').fillna(0)
+    else:
+        df_m5['TRM_Num'] = 1
+
+    # Llamadas
+    if c_llam_raw and pd.api.types.is_numeric_dtype(df_m5[c_llam_raw]):
+        df_m5['LLAM_Num'] = pd.to_numeric(df_m5[c_llam_raw], errors='coerce').fillna(0)
+    else:
+        df_m5['LLAM_Num'] = df_m5['TRM_Num']
+
+    # Puntos
+    if c_pts_raw and pd.api.types.is_numeric_dtype(df_m5[c_pts_raw]):
+        df_m5['PTS_Num'] = pd.to_numeric(df_m5[c_pts_raw], errors='coerce').fillna(0)
+    else:
+        df_m5['PTS_Num'] = (df_m5['AP_Num'] * 10) + (df_m5['LE_Num'] * 2)
+
+    # Horas
+    for col_src, col_dest in [(c_hprog_raw, 'HPROG_Num'), (c_hlog_raw, 'HLOG_Num'), (c_haus_raw, 'HAUS_Num')]:
+        if col_src and pd.api.types.is_numeric_dtype(df_m5[col_src]):
+            df_m5[col_dest] = pd.to_numeric(df_m5[col_src], errors='coerce').fillna(0)
+        else:
+            df_m5[col_dest] = 0
+
+    # 4. FILTROS EN PANTALLA CON MATCH FLEXIBLE DE MESES
     st.markdown("<h3 class='header-section'>⚙️ Filtros de Selección Multi-Mes y Segmentación</h3>", unsafe_allow_html=True)
-    
     col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
 
-    meses_disponibles = sorted(df_m5[c_mes].astype(str).dropna().unique().tolist())
-    
+    meses_disponibles = sorted(df_m5[c_mes].astype(str).str.strip().unique().tolist())
+    supervisores_disponibles = sorted(df_m5[c_sup].astype(str).str.strip().unique().tolist())
+
     with col_f1:
         sel_meses_m5 = st.multiselect(
             "📅 Seleccionar Meses a Promediar:",
             options=meses_disponibles,
             default=meses_disponibles,
-            help="Selecciona los meses que deseas incluir. Los asesores sin actividad en un mes seleccionado no serán penalizados en el denominador de sus promedios."
+            help="Selecciona los meses a promediar. Los asesores sin gestión en un mes no serán penalizados."
         )
 
     with col_f2:
-        supervisores_disponibles = sorted(df_m5[c_sup].astype(str).dropna().unique().tolist())
         sel_sup_m5 = st.multiselect(
             "👔 Filtrar por Supervisor:",
             options=supervisores_disponibles,
@@ -4315,29 +4418,38 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     with col_f3:
         search_asesor = st.text_input("🔍 Buscar Asesor:", value="", placeholder="Nombre del asesor...")
 
-    # Validar selección de meses
     if not sel_meses_m5:
         st.warning("⚠️ Debes seleccionar al menos un mes para calcular los promedios.")
         st.stop()
 
-    # Filtrar datos según la selección de la cabecera
-    df_filtered_m5 = df_m5[
-        (df_m5[c_mes].astype(str).isin(sel_meses_m5)) & 
-        (df_m5[c_sup].astype(str).isin(sel_sup_m5))
-    ].copy()
+    # Normalizador de concordancia de meses
+    def month_matches_filter(val_str, filter_list):
+        if not filter_list:
+            return True
+        v_low = str(val_str).strip().lower()
+        for f in filter_list:
+            f_low = str(f).strip().lower()
+            if f_low in v_low or v_low in f_low:
+                return True
+        return False
+
+    mask_mes = df_m5[c_mes].apply(lambda x: month_matches_filter(x, sel_meses_m5))
+    mask_sup = df_m5[c_sup].astype(str).str.strip().isin(sel_sup_m5) if sel_sup_m5 else True
+
+    df_filtered_m5 = df_m5[mask_mes & mask_sup].copy()
 
     if search_asesor.strip() != "":
         df_filtered_m5 = df_filtered_m5[df_filtered_m5[c_asesor].astype(str).str.contains(search_asesor, case=False, na=False)]
 
     if df_filtered_m5.empty:
-        st.info("No se encontraron registros de asesores para el filtro aplicado.")
+        st.info("No se encontraron registros de asesores para los filtros aplicados.")
         st.stop()
 
-    # 3. LÓGICA DE CÁLCULO DE MESES ACTIVOS Y PROMEDIOS PONDERADOS PER-ASESOR
+    # 5. CÁLCULO DE MESES ACTIVOS Y CONSOLIDACIÓN PER-ASESOR
     df_filtered_m5['Es_Mes_Activo'] = (
-        (df_filtered_m5[c_le] > 0) | 
-        (df_filtered_m5[c_trm] > 0) | 
-        (df_filtered_m5[c_hlog] > 0)
+        (df_filtered_m5['LE_Num'] > 0) | 
+        (df_filtered_m5['TRM_Num'] > 0) | 
+        (df_filtered_m5['HLOG_Num'] > 0)
     )
 
     df_activos = df_filtered_m5[df_filtered_m5['Es_Mes_Activo']]
@@ -4345,42 +4457,42 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     resumen_asesor = df_filtered_m5.groupby(c_asesor).agg({
         c_sup: 'last',
-        c_le: 'sum',
-        c_trm: 'sum',
-        c_llam: 'sum',
-        c_ap: 'sum',
-        c_pts: 'sum',
-        c_hprog: 'sum',
-        c_hlog: 'sum',
-        c_haus: 'sum'
+        'LE_Num': 'sum',
+        'TRM_Num': 'sum',
+        'LLAM_Num': 'sum',
+        'AP_Num': 'sum',
+        'PTS_Num': 'sum',
+        'HPROG_Num': 'sum',
+        'HLOG_Num': 'sum',
+        'HAUS_Num': 'sum'
     }).reset_index()
 
     resumen_asesor['Meses_Activos'] = resumen_asesor[c_asesor].map(mapa_meses_activos).fillna(0).astype(int)
     resumen_asesor['Meses_Activos_Denom'] = resumen_asesor['Meses_Activos'].clip(lower=1)
 
-    resumen_asesor['Prom_LE_Mes'] = (resumen_asesor[c_le] / resumen_asesor['Meses_Activos_Denom']).round(1)
-    resumen_asesor['Prom_AP_Mes'] = (resumen_asesor[c_ap] / resumen_asesor['Meses_Activos_Denom']).round(1)
-    resumen_asesor['Prom_Puntos_Mes'] = (resumen_asesor[c_pts] / resumen_asesor['Meses_Activos_Denom']).round(1)
+    resumen_asesor['Prom_LE_Mes'] = (resumen_asesor['LE_Num'] / resumen_asesor['Meses_Activos_Denom']).round(1)
+    resumen_asesor['Prom_AP_Mes'] = (resumen_asesor['AP_Num'] / resumen_asesor['Meses_Activos_Denom']).round(1)
+    resumen_asesor['Prom_Puntos_Mes'] = (resumen_asesor['PTS_Num'] / resumen_asesor['Meses_Activos_Denom']).round(1)
 
     resumen_asesor['Conv_Trm_Llam_%'] = np.where(
-        resumen_asesor[c_llam] > 0, 
-        (resumen_asesor[c_trm] / resumen_asesor[c_llam] * 100), 
+        resumen_asesor['LLAM_Num'] > 0, 
+        (resumen_asesor['TRM_Num'] / resumen_asesor['LLAM_Num'] * 100), 
         0.0
     ).round(2)
 
     resumen_asesor['%_AP_LE'] = np.where(
-        resumen_asesor[c_le] > 0, 
-        (resumen_asesor[c_ap] / resumen_asesor[c_le] * 100), 
+        resumen_asesor['LE_Num'] > 0, 
+        (resumen_asesor['AP_Num'] / resumen_asesor['LE_Num'] * 100), 
         0.0
     ).round(2)
 
     resumen_asesor['%_Ausentismo'] = np.where(
-        resumen_asesor[c_hprog] > 0, 
-        (resumen_asesor[c_haus] / resumen_asesor[c_hprog] * 100), 
+        resumen_asesor['HPROG_Num'] > 0, 
+        (resumen_asesor['HAUS_Num'] / resumen_asesor['HPROG_Num'] * 100), 
         0.0
     ).round(2)
 
-    # 4. CÁLCULO ESTADÍSTICO DE CUARTILES OPERATIVOS (Q1 Top -> Q4 Bajo)
+    # Cuartiles (Q1 Top -> Q4 Bajo)
     def asignar_cuartil(series):
         if len(series.dropna()) < 4:
             return pd.Series(['Q1 (Top)'] * len(series), index=series.index)
@@ -4397,21 +4509,21 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     resumen_asesor.rename(columns={
         c_asesor: 'Asesor',
         c_sup: 'Supervisor',
-        c_le: 'Total LE',
-        c_trm: 'Total Trámites',
-        c_llam: 'Total Llamadas',
-        c_ap: 'Total AP (Aprobadas)',
-        c_pts: 'Total Puntos',
-        c_hprog: 'Horas Programadas',
-        c_hlog: 'Horas Logueadas',
-        c_haus: 'Horas Ausentismo'
+        'LE_Num': 'Total LE',
+        'TRM_Num': 'Total Trámites',
+        'LLAM_Num': 'Total Llamadas',
+        'AP_Num': 'Total AP (Aprobadas)',
+        'PTS_Num': 'Total Puntos',
+        'HPROG_Num': 'Horas Programadas',
+        'HLOG_Num': 'Horas Logueadas',
+        'HAUS_Num': 'Horas Ausentismo'
     }, inplace=True)
 
-    # 5. TARJETAS DE INDICADORES GENERALES DE LA OPERACIÓN
+    # 6. TARJETAS SUPERIORES DE KPIS GENERALES
     tot_asesores_eval = len(resumen_asesor)
-    prom_op_le = resumen_asesor['Prom_LE_Mes'].mean()
-    prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean()
-    prom_op_aus = resumen_asesor['%_Ausentismo'].mean()
+    prom_op_le = resumen_asesor['Prom_LE_Mes'].mean() if tot_asesores_eval > 0 else 0.0
+    prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean() if tot_asesores_eval > 0 else 0.0
+    prom_op_aus = resumen_asesor['%_Ausentismo'].mean() if tot_asesores_eval > 0 else 0.0
 
     c_m1, c_m2, c_m3, c_m4 = st.columns(4)
     with c_m1:
@@ -4425,7 +4537,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 6. ALERTAS DESPLEGABLES: TOP 10 ASESORES MÁS BAJOS POR KPI
+    # 7. ALERTAS DESPLEGABLES: TOP 10 ASESORES MÁS BAJOS
     st.markdown("<h3 class='header-section'>⚠️ Secciones de Alertas: Top 10 Asesores Más Bajos por Indicador</h3>", unsafe_allow_html=True)
 
     cols_export_alert = [
@@ -4474,7 +4586,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 7. TABLA CONSOLIDADA GENERAL DE PRODUCTIVIDAD PROMEDIO POR ASESOR
+    # 8. TABLA CONSOLIDADA GENERAL
     st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General por Asesor</h3>", unsafe_allow_html=True)
     st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
 
@@ -4509,7 +4621,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         hide_index=True
     )
 
-    # 8. ANÁLISIS GRÁFICO INTERACTIVO (PLOTLY)
+    # 9. MATRIZ VISUAL GRÁFICA (PLOTLY)
     st.markdown("<h3 class='header-section'>📊 Matriz Visual: Cuartiles y Distribución de Desempeño</h3>", unsafe_allow_html=True)
 
     col_g1, col_g2 = st.columns(2)
