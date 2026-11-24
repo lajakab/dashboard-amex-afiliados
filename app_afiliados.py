@@ -4223,8 +4223,7 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
 # =====================================================================
 # MÓDULO 5: PROMEDIO GENERAL DEL ASESOR (CONSOLIDADO MULTI-MES)
 # =====================================================================
-elif "5." in opcion_modulo or "Promedio General" in opcion_modulo:
-
+elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     st.markdown("<div class='main-title'>👤 Módulo 5: Promedio General del Asesor</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='sub-title'>Consolidado histórico por asesor con promedios ajustados según meses de vinculación/actividad efectiva, "
