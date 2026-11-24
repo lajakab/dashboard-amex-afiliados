@@ -306,7 +306,7 @@ opcion_hoja = st.sidebar.radio(
         "📊 Informe Gerencial por Día",
         "👥 Operación - Asesores & Supervisores",
         "🗓️ Módulo 3: Productividad Diaria",
-        "🧑‍💼 Módulo 4: Análisis Supervisor"
+        "🧑‍💼 Módulo 4: Análisis Supervisor",
         "5. Promedio General del Asesor"  # <-- AGREGAR ESTA OPCIÓN AQUI
     ]
 )
