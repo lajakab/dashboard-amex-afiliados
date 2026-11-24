@@ -307,6 +307,7 @@ opcion_hoja = st.sidebar.radio(
         "👥 Operación - Asesores & Supervisores",
         "🗓️ Módulo 3: Productividad Diaria",
         "🧑‍💼 Módulo 4: Análisis Supervisor"
+        "5. Promedio General del Asesor"  # <-- AGREGAR ESTA OPCIÓN AQUI
     ]
 )
 # =========================================================================
@@ -4219,3 +4220,323 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
         fig=go.Figure(go.Pie(labels=["Dentro","Fuera"],values=[inside,outside],hole=.55,marker_colors=["#16a34a","#dc2626"]))
         fig.update_layout(height=350,title="Distribución de cumplimiento")
         st.plotly_chart(fig,use_container_width=True)
+# =====================================================================
+# MÓDULO 5: PROMEDIO GENERAL DEL ASESOR (CONSOLIDADO MULTI-MES)
+# =====================================================================
+elif "5." in opcion_modulo or "Promedio General" in opcion_modulo:
+
+    st.markdown("<div class='main-title'>👤 Módulo 5: Promedio General del Asesor</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='sub-title'>Consolidado histórico por asesor con promedios ajustados según meses de vinculación/actividad efectiva, "
+        "matriz de cuartiles operativos y alertas tempranas de bajo desempeño.</div>", 
+        unsafe_allow_html=True
+    )
+
+    # 1. DETECCIÓN FLEXIBLE DE COLUMNAS DEL DATASET ORIGINAL
+    def find_col(candidates, default_name):
+        for c in candidates:
+            if c in df.columns:
+                return c
+        cols_lower = {str(col).strip().lower(): col for col in df.columns}
+        for c in candidates:
+            cl = str(c).strip().lower()
+            if cl in cols_lower:
+                return cols_lower[cl]
+        return default_name
+
+    c_asesor = find_col(['Asesor', 'asesor', 'Nombre_Asesor', 'asesor_clean', 'Nom_Asesor'], 'Asesor')
+    c_sup = find_col(['Supervisor', 'supervisor', 'Nombre_Supervisor', 'Servidor_Clean'], 'Supervisor')
+    c_mes = find_col(['Año_Mes', 'ano_mes', 'Mes', 'mes_venta', 'fecha_vta_clean'], 'Año_Mes')
+    c_le = find_col(['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC'], 'LE')
+    c_trm = find_col(['Tramites', 'tramites', 'TRM', 'Total_Tramites'], 'Tramites')
+    c_llam = find_col(['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas'], 'Llamadas')
+    c_ap = find_col(['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean'], 'AP')
+    c_pts = find_col(['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion'], 'Puntos')
+    c_hprog = find_col(['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'], 'Horas_Prog')
+    c_hlog = find_col(['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'], 'Horas_Log')
+    c_haus = find_col(['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'], 'Horas_Aus')
+
+    # Garantizar que las columnas necesarias existan en el DataFrame local
+    df_m5 = df.copy()
+    
+    # Normalizar valores numéricos si la columna AT contiene letras ('A') en lugar de conteos
+    if c_ap in df_m5.columns and df_m5[c_ap].dtype == 'object':
+        df_m5['AP_Num'] = (df_m5[c_ap] == 'A').astype(int)
+        c_ap = 'AP_Num'
+
+    for col_req in [c_le, c_trm, c_llam, c_ap, c_pts, c_hprog, c_hlog, c_haus]:
+        if col_req not in df_m5.columns:
+            df_m5[col_req] = 0
+        else:
+            df_m5[col_req] = pd.to_numeric(df_m5[col_req], errors='coerce').fillna(0)
+
+    # 2. FILTROS INTERNOS DEL MÓDULO 5
+    st.markdown("<h3 class='header-section'>⚙️ Filtros de Selección Multi-Mes y Segmentación</h3>", unsafe_allow_html=True)
+    
+    col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
+
+    meses_disponibles = sorted(df_m5[c_mes].dropna().unique().tolist())
+    
+    with col_f1:
+        sel_meses_m5 = st.multiselect(
+            "📅 Seleccionar Meses a Promediar:",
+            options=meses_disponibles,
+            default=meses_disponibles,
+            help="Selecciona los meses que deseas incluir. Los asesores sin actividad en un mes seleccionado no serán penalizados en el denominador de sus promedios."
+        )
+
+    with col_f2:
+        supervisores_disponibles = sorted(df_m5[c_sup].dropna().unique().tolist())
+        sel_sup_m5 = st.multiselect(
+            "👔 Filtrar por Supervisor:",
+            options=supervisores_disponibles,
+            default=supervisores_disponibles
+        )
+
+    with col_f3:
+        search_asesor = st.text_input("🔍 Buscar Asesor:", value="", placeholder="Nombre del asesor...")
+
+    # Validar selección de meses
+    if not sel_meses_m5:
+        st.warning("⚠️ Debes seleccionar al menos un mes para calcular los promedios.")
+        st.stop()
+
+    # Filtrar datos según la selección de la cabecera
+    df_filtered_m5 = df_m5[
+        (df_m5[c_mes].isin(sel_meses_m5)) & 
+        (df_m5[c_sup].isin(sel_sup_m5))
+    ].copy()
+
+    if search_asesor.strip() != "":
+        df_filtered_m5 = df_filtered_m5[df_filtered_m5[c_asesor].str.contains(search_asesor, case=False, na=False)]
+
+    if df_filtered_m5.empty:
+        st.info("No se encontraron registros de asesores para el filtro aplicado.")
+        st.stop()
+
+    # 3. LÓGICA DE CÁLCULO DE MESES ACTIVOS Y PROMEDIOS PONDERADOS PER-ASESOR
+    # Identificar meses donde el asesor estuvo contratado/activo (LE > 0, Trámites > 0 u Horas Logueadas > 0)
+    df_filtered_m5['Es_Mes_Activo'] = (
+        (df_filtered_m5[c_le] > 0) | 
+        (df_filtered_m5[c_trm] > 0) | 
+        (df_filtered_m5[c_hlog] > 0)
+    )
+
+    # Mapear meses activos reales por asesor
+    df_activos = df_filtered_m5[df_filtered_m5['Es_Mes_Activo']]
+    mapa_meses_activos = df_activos.groupby(c_asesor)[c_mes].nunique().to_dict()
+
+    # Agrupar datos consolidados por Asesor
+    resumen_asesor = df_filtered_m5.groupby(c_asesor).agg({
+        c_sup: 'last',
+        c_le: 'sum',
+        c_trm: 'sum',
+        c_llam: 'sum',
+        c_ap: 'sum',
+        c_pts: 'sum',
+        c_hprog: 'sum',
+        c_hlog: 'sum',
+        c_haus: 'sum'
+    }).reset_index()
+
+    # Asignar meses activos con denominador mínimo de 1 (evita división por cero)
+    resumen_asesor['Meses_Activos'] = resumen_asesor[c_asesor].map(mapa_meses_activos).fillna(0).astype(int)
+    resumen_asesor['Meses_Activos_Denom'] = resumen_asesor['Meses_Activos'].clip(lower=1)
+
+    # Promedios mensuales ajustados (ÚNICAMENTE sobre meses activos del asesor)
+    resumen_asesor['Prom_LE_Mes'] = (resumen_asesor[c_le] / resumen_asesor['Meses_Activos_Denom']).round(1)
+    resumen_asesor['Prom_AP_Mes'] = (resumen_asesor[c_ap] / resumen_asesor['Meses_Activos_Denom']).round(1)
+    resumen_asesor['Prom_Puntos_Mes'] = (resumen_asesor[c_pts] / resumen_asesor['Meses_Activos_Denom']).round(1)
+
+    # Ratios de gestión porcentuales
+    resumen_asesor['Conv_Trm_Llam_%'] = np.where(
+        resumen_asesor[c_llam] > 0, 
+        (resumen_asesor[c_trm] / resumen_asesor[c_llam] * 100), 
+        0.0
+    ).round(2)
+
+    resumen_asesor['%_AP_LE'] = np.where(
+        resumen_asesor[c_le] > 0, 
+        (resumen_asesor[c_ap] / resumen_asesor[c_le] * 100), 
+        0.0
+    ).round(2)
+
+    resumen_asesor['%_Ausentismo'] = np.where(
+        resumen_asesor[c_hprog] > 0, 
+        (resumen_asesor[c_haus] / resumen_asesor[c_hprog] * 100), 
+        0.0
+    ).round(2)
+
+    # 4. CÁLCULO ESTADÍSTICO DE CUARTILES OPERATIVOS (Q1 Top -> Q4 Bajo)
+    def asignar_cuartil(series):
+        if len(series.dropna()) < 4:
+            return pd.Series(['Q1 (Top)'] * len(series), index=series.index)
+        try:
+            ranks = series.rank(method='first', ascending=True)
+            return pd.qcut(ranks, q=4, labels=['Q4 (Bajo)', 'Q3 (Medio-Bajo)', 'Q2 (Medio-Alto)', 'Q1 (Top)'])
+        except Exception:
+            return pd.Series(['Q1 (Top)'] * len(series), index=series.index)
+
+    resumen_asesor['Cuartil_LE'] = asignar_cuartil(resumen_asesor['Prom_LE_Mes'])
+    resumen_asesor['Cuartil_AP'] = asignar_cuartil(resumen_asesor['Prom_AP_Mes'])
+    resumen_asesor['Cuartil_Puntos'] = asignar_cuartil(resumen_asesor['Prom_Puntos_Mes'])
+
+    # Reordenar y renombrar columnas principales
+    resumen_asesor.rename(columns={
+        c_asesor: 'Asesor',
+        c_sup: 'Supervisor',
+        c_le: 'Total LE',
+        c_trm: 'Total Trámites',
+        c_llam: 'Total Llamadas',
+        c_ap: 'Total AP (Aprobadas)',
+        c_pts: 'Total Puntos',
+        c_hprog: 'Horas Programadas',
+        c_hlog: 'Horas Logueadas',
+        c_haus: 'Horas Ausentismo'
+    }, inplace=True)
+
+    # 5. TARJETAS DE INDICADORES GENERALES DE LA OPERACIÓN
+    tot_asesores_eval = len(resumen_asesor)
+    prom_op_le = resumen_asesor['Prom_LE_Mes'].mean()
+    prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean()
+    prom_op_aus = resumen_asesor['%_Ausentismo'].mean()
+
+    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+    with c_m1:
+        st.markdown(f"<div class='kpi-card'><div class='kpi-title'>👥 Asesores Evaluados</div><div class='kpi-val'>{tot_asesores_eval:,}</div></div>", unsafe_allow_html=True)
+    with c_m2:
+        st.markdown(f"<div class='kpi-card'><div class='kpi-title'>📈 Promedio Op. LE/Mes</div><div class='kpi-val'>{prom_op_le:.1f}</div></div>", unsafe_allow_html=True)
+    with c_m3:
+        st.markdown(f"<div class='kpi-card'><div class='kpi-title'>🟢 Promedio Op. AP/Mes</div><div class='kpi-val'>{prom_op_ap:.1f}</div></div>", unsafe_allow_html=True)
+    with c_m4:
+        st.markdown(f"<div class='kpi-card'><div class='kpi-title'>🔴 Ausentismo Promedio</div><div class='kpi-val'>{prom_op_aus:.2f}%</div></div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # 6. ALERTAS DESPLEGABLES: TOP 10 ASESORES MÁS BAJOS POR KPI
+    st.markdown("<h3 class='header-section'>⚠️ Secciones de Alertas: Top 10 Asesores Más Bajos por Indicador</h3>", unsafe_allow_html=True)
+
+    cols_export_alert = [
+        'Asesor', 'Supervisor', 'Meses_Activos', 'Prom_LE_Mes', 'Total LE', 
+        'Prom_AP_Mes', 'Total AP (Aprobadas)', 'Prom_Puntos_Mes', 'Total Puntos', 
+        'Conv_Trm_Llam_%', '%_AP_LE', '%_Ausentismo', 'Cuartil_LE', 'Cuartil_AP', 'Cuartil_Puntos'
+    ]
+
+    tab_alt1, tab_alt2, tab_alt3, tab_alt4, tab_alt5 = st.tabs([
+        "⚠️ 1. Menor LE/Mes", 
+        "⚠️ 2. Menor AP/Mes", 
+        "⚠️ 3. Menor Puntos/Mes", 
+        "⚠️ 4. Menor Conversión", 
+        "⚠️ 5. Menor % AP/LE"
+    ])
+
+    with tab_alt1:
+        top10_le_low = resumen_asesor.sort_values(by='Prom_LE_Mes', ascending=True).head(10)
+        with st.expander("🚨 Ver detalle completo de los 10 Asesores con menor Promedio LE/Mes", expanded=True):
+            st.caption("Asesores que requieren refuerzo en generación de Leads Efectivos:")
+            st.dataframe(top10_le_low[cols_export_alert], use_container_width=True, hide_index=True)
+
+    with tab_alt2:
+        top10_ap_low = resumen_asesor.sort_values(by='Prom_AP_Mes', ascending=True).head(10)
+        with st.expander("🚨 Ver detalle completo de los 10 Asesores con menor Promedio de Aprobaciones (AP)/Mes", expanded=True):
+            st.caption("Asesores con baja tasa de cierre/aprobaciones efectivas:")
+            st.dataframe(top10_ap_low[cols_export_alert], use_container_width=True, hide_index=True)
+
+    with tab_alt3:
+        top10_pts_low = resumen_asesor.sort_values(by='Prom_Puntos_Mes', ascending=True).head(10)
+        with st.expander("🚨 Ver detalle completo de los 10 Asesores con menor Promedio de Puntos/Mes", expanded=True):
+            st.caption("Asesores ubicados en el fondo de la tabla de puntos acumulados:")
+            st.dataframe(top10_pts_low[cols_export_alert], use_container_width=True, hide_index=True)
+
+    with tab_alt4:
+        top10_conv_low = resumen_asesor.sort_values(by='Conv_Trm_Llam_%', ascending=True).head(10)
+        with st.expander("🚨 Ver detalle completo de los 10 Asesores con menor Conversión (Trámites / Llamadas %)", expanded=True):
+            st.caption("Asesores con baja efectividad por llamadas atendidas/realizadas:")
+            st.dataframe(top10_conv_low[cols_export_alert], use_container_width=True, hide_index=True)
+
+    with tab_alt5:
+        top10_ap_le_low = resumen_asesor.sort_values(by='%_AP_LE', ascending=True).head(10)
+        with st.expander("🚨 Ver detalle completo de los 10 Asesores con menor % Aprobaciones sobre LE (% AP / LE)", expanded=True):
+            st.caption("Asesores con menor perfilamiento o efectividad final sobre el total de LE gestionados:")
+            st.dataframe(top10_ap_le_low[cols_export_alert], use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # 7. TABLA CONSOLIDADA GENERAL DE PRODUCTIVIDAD PROMEDIO POR ASESOR
+    st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General por Asesor</h3>", unsafe_allow_html=True)
+    st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
+
+    # Estilizado visual de celdas con colores para Cuartiles y Ausentismo
+    def aplicar_estilos_m5(row):
+        styles = [''] * len(row)
+        q_le = str(row.get('Cuartil_LE', ''))
+        q_ap = str(row.get('Cuartil_AP', ''))
+        aus = float(row.get('%_Ausentismo', 0))
+
+        # Resaltar Q1 en verde claro y Q4 en rojo claro
+        if 'Q1' in q_le or 'Q1' in q_ap:
+            idx_le = row.index.get_loc('Prom_LE_Mes') if 'Prom_LE_Mes' in row.index else -1
+            if idx_le >= 0:
+                styles[idx_le] = 'background-color: #dcfce7; font-weight: bold; color: #166534;'
+        
+        if 'Q4' in q_le or 'Q4' in q_ap:
+            idx_ap = row.index.get_loc('Prom_AP_Mes') if 'Prom_AP_Mes' in row.index else -1
+            if idx_ap >= 0:
+                styles[idx_ap] = 'background-color: #fee2e2; font-weight: bold; color: #991b1b;'
+
+        if aus > 10.0:
+            idx_aus = row.index.get_loc('%_Ausentismo') if '%_Ausentismo' in row.index else -1
+            if idx_aus >= 0:
+                styles[idx_aus] = 'background-color: #fef3c7; color: #92400e; font-weight: bold;'
+
+        return styles
+
+    # Orden predeterminado por Promedio LE Descendente
+    resumen_display = resumen_asesor.sort_values(by='Prom_LE_Mes', ascending=False).reset_index(drop=True)
+
+    st.dataframe(
+        resumen_display[cols_export_alert].style.apply(aplicar_estilos_m5, axis=1),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # 8. ANÁLISIS GRÁFICO INTERACTIVO (PLOTLY)
+    st.markdown("<h3 class='header-section'>📊 Matriz Visual: Cuartiles y Distribución de Desempeño</h3>", unsafe_allow_html=True)
+
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        fig_scatter = px.scatter(
+            resumen_display,
+            x='Prom_LE_Mes',
+            y='Prom_AP_Mes',
+            size='Total Puntos',
+            color='Cuartil_LE',
+            hover_name='Asesor',
+            hover_data=['Supervisor', 'Meses_Activos', '%_AP_LE', '%_Ausentismo'],
+            title="Relación Promedio LE/Mes vs. Promedio AP/Mes por Asesor",
+            color_discrete_map={
+                'Q1 (Top)': '#16a34a',
+                'Q2 (Medio-Alto)': '#2563eb',
+                'Q3 (Medio-Bajo)': '#f59e0b',
+                'Q4 (Bajo)': '#dc2626'
+            }
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+
+    with col_g2:
+        top_bottom_cmp = pd.concat([
+            resumen_display.head(5).assign(Tipo='Top 5 Mejoes'),
+            resumen_display.tail(5).assign(Tipo='Top 5 Bajos')
+        ])
+        fig_bar = px.bar(
+            top_bottom_cmp,
+            x='Asesor',
+            y='Prom_LE_Mes',
+            color='Tipo',
+            text='Prom_LE_Mes',
+            title="Comparativo Extremos: Top 5 Mejores vs. Top 5 Más Bajos (Prom LE/Mes)",
+            color_discrete_map={'Top 5 Mejoes': '#16a34a', 'Top 5 Bajos': '#dc2626'}
+        )
+        fig_bar.update_traces(textposition='outside')
+        st.plotly_chart(fig_bar, use_container_width=True)
