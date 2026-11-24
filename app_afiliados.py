@@ -4252,7 +4252,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     df_m5 = df_base_m5.copy()
 
-    # 2. FUNCIONES DE EXTRACCIÓN Y LIMPIEZA BLINDADAS (EVITA TYPEERROR Y KEYERROR)
+    # 2. FUNCIONES DE EXTRACCIÓN Y LIMPIEZA BLINDADAS
     def find_col(df_in, candidates, fallback_keywords=None):
         if df_in is None or df_in.empty:
             return None
@@ -4309,6 +4309,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         return (0, 0)
 
     # 4. IDENTIFICACIÓN DE COLUMNAS PRINCIPALES
+    # A) Mes
     c_mes = find_col(df_m5, ['Año_Mes', 'ano_mes', 'Mes', 'mes', 'Año Mes', 'Ano_Mes', 'Mes_Venta'], ['año_mes', 'ano_mes'])
     if not c_mes or pd.api.types.is_datetime64_any_dtype(df_m5[c_mes]) or ' ' not in str(df_m5[c_mes].iloc[0]):
         if 'fecha_vta_dt' in df_m5.columns:
@@ -4321,8 +4322,15 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         df_m5['Año_Mes_Clean'] = dt_col.dt.month.map(meses_es) + " " + dt_col.dt.year.astype(str)
         c_mes = 'Año_Mes_Clean'
 
+    # B) Asesor
     c_asesor = find_col(df_m5, ['Nombre_Asesor', 'Asesor', 'asesor', 'ASESOR', 'Nombre Asesor', 'Nom_Asesor', 'Agente', 'Usuario', 'Vendedor', 'Ejecutivo', 'Nombre'], ['asesor', 'agente', 'vendedor', 'usuario', 'ejecutivo'])
-    c_sup = find_col(df_m5, ['Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'Nombre Supervisor', 'Nom_Supervisor', 'sup_clean', 'sup_nombre', 'Sup', 'SUP', 'Coordinador', 'Team Leader', 'Lider', 'Líder', 'Jefe'], ['superv', 'coordinad', 'lider', 'jefe'])
+
+    # C) Supervisor (Mapeo amplio para evitar que caiga en 'Operación AMEX')
+    c_sup = find_col(
+        df_m5, 
+        ['Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'Nombre Supervisor', 'Nom_Supervisor', 'sup_clean', 'sup_nombre', 'Sup', 'SUP', 'BY', 'Servidor_Clean', 'Coordinador', 'Team Leader', 'Lider', 'Líder', 'Jefe'], 
+        ['superv', 'coordinad', 'lider', 'jefe', 'sup', 'by']
+    )
 
     s_mes_raw = get_clean_series(df_m5, c_mes, default_val="Sin Mes")
     s_ase_raw = get_clean_series(df_m5, c_asesor, default_val="Asesor General")
@@ -4332,7 +4340,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     df_m5['_Asesor_Clean'] = s_ase_raw.astype(str).str.strip()
     df_m5['_Supervisor_Clean'] = s_sup_raw.astype(str).str.strip()
 
-    # 5. NORMALIZACIÓN VECTORIZADA RÁPIDA DE MÉTRICAS
+    # 5. NORMALIZACIÓN VECTORIZADA DE MÉTRICAS
     c_le_raw = find_col(df_m5, ['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC', 'estatus_val', 'status_vta', 'C', 'H'])
     c_ap_raw = find_col(df_m5, ['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión', 'decisión', 'DECISION', 'AT'])
     c_trm_raw = find_col(df_m5, ['Tramites', 'tramites', 'TRM', 'Total_Tramites', 'tramite'])
@@ -4371,13 +4379,13 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     df_m5['HLOG_Num'] = pd.to_numeric(get_clean_series(df_m5, c_hlog_raw, default_val="0"), errors='coerce').fillna(0)
     df_m5['HAUS_Num'] = pd.to_numeric(get_clean_series(df_m5, c_haus_raw, default_val="0"), errors='coerce').fillna(0)
 
-    # 6. FILTROS RÁPIDOS EN PANTALLA
-    st.markdown("<h3 class='header-section'>⚙️ Filtros de Selección Multi-Mes y Segmentación</h3>", unsafe_allow_html=True)
-    col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
-
+    # 6. FILTRADO INICIAL POR MESES Y SUPERVISORES
     meses_disponibles = get_clean_unique_list(df_m5['_Mes_Clean'], sort_key=get_sort_key)
     supervisores_disponibles = get_clean_unique_list(df_m5['_Supervisor_Clean'])
 
+    st.markdown("<h3 class='header-section'>⚙️ Filtros de Selección Multi-Mes y Segmentación Operativa</h3>", unsafe_allow_html=True)
+
+    col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
     with col_f1:
         sel_meses_m5 = st.multiselect(
             "📅 Seleccionar Meses a Promediar:",
@@ -4400,20 +4408,16 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         st.warning("⚠️ Debes seleccionar al menos un mes para calcular los promedios.")
         st.stop()
 
-    # Filtrado Vectorizado Optimizado
     mask_mes = df_m5['_Mes_Clean'].isin(sel_meses_m5)
     mask_sup = df_m5['_Supervisor_Clean'].isin(sel_sup_m5) if sel_sup_m5 else True
 
     df_filtered_m5 = df_m5[mask_mes & mask_sup].copy()
 
-    if search_asesor.strip() != "":
-        df_filtered_m5 = df_filtered_m5[df_filtered_m5['_Asesor_Clean'].str.contains(search_asesor, case=False, na=False)]
-
     if df_filtered_m5.empty:
-        st.info("No se encontraron registros de asesores para los filtros aplicados.")
+        st.info("No se encontraron registros para la combinación de Meses y Supervisores seleccionada.")
         st.stop()
 
-    # 7. CONSOLIDACIÓN DE MESES ACTIVOS Y PROMEDIOS POR ASESOR
+    # 7. CONSOLIDACIÓN PER-ASESOR Y CÁLCULO DE MESES ACTIVOS + CUARTILES
     df_filtered_m5['Es_Mes_Activo'] = (
         (df_filtered_m5['LE_Num'] > 0) | 
         (df_filtered_m5['TRM_Num'] > 0) | 
@@ -4460,7 +4464,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         0.0
     ).round(2)
 
-    # Cuartiles estadísticos
+    # Asignación de Cuartiles
     def asignar_cuartil(series):
         if len(series.dropna()) < 4:
             return pd.Series(['Q1 (Top)'] * len(series), index=series.index)
@@ -4486,7 +4490,57 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         'Horas_Aus': 'Horas Ausentismo'
     }, inplace=True)
 
-    # 8. TARJETAS SUPERIORES DE KPIS OPERATIVOS
+    # 8. SEGUNDA FILA DE FILTROS: MESES ACTIVOS Y CUARTILES (NUEVOS REQUERIMIENTOS)
+    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+
+    opciones_meses_activos = sorted(resumen_asesor['Meses_Activos'].unique().tolist())
+    opciones_cuartiles = ['Q1 (Top)', 'Q2 (Medio-Alto)', 'Q3 (Medio-Bajo)', 'Q4 (Bajo)']
+
+    with col_q1:
+        sel_activos_m5 = st.multiselect(
+            "⏳ Filtro Meses Activos:",
+            options=opciones_meses_activos,
+            default=opciones_meses_activos,
+            help="Filtra asesores según la cantidad de meses con actividad efectiva en el periodo."
+        )
+
+    with col_q2:
+        sel_c_le = st.multiselect(
+            "📊 Cuartil LE:",
+            options=opciones_cuartiles,
+            default=opciones_cuartiles
+        )
+
+    with col_q3:
+        sel_c_ap = st.multiselect(
+            "🟢 Cuartil AP:",
+            options=opciones_cuartiles,
+            default=opciones_cuartiles
+        )
+
+    with col_q4:
+        sel_c_pts = st.multiselect(
+            "⭐ Cuartil Puntos:",
+            options=opciones_cuartiles,
+            default=opciones_cuartiles
+        )
+
+    # APLICAR FILTROS DE ASESOR (MESES ACTIVOS, CUARTILES Y BÚSQUEDA)
+    mask_activos = resumen_asesor['Meses_Activos'].isin(sel_activos_m5) if sel_activos_m5 else True
+    mask_cle = resumen_asesor['Cuartil_LE'].astype(str).isin(sel_c_le) if sel_c_le else True
+    mask_cap = resumen_asesor['Cuartil_AP'].astype(str).isin(sel_c_ap) if sel_c_ap else True
+    mask_cpts = resumen_asesor['Cuartil_Puntos'].astype(str).isin(sel_c_pts) if sel_c_pts else True
+
+    resumen_asesor = resumen_asesor[mask_activos & mask_cle & mask_cap & mask_cpts].copy()
+
+    if search_asesor.strip() != "":
+        resumen_asesor = resumen_asesor[resumen_asesor['Asesor'].str.contains(search_asesor, case=False, na=False)]
+
+    if resumen_asesor.empty:
+        st.info("No se encontraron asesores que cumplan con los criterios de Meses Activos, Cuartiles o Búsqueda aplicados.")
+        st.stop()
+
+    # 9. TARJETAS SUPERIORES DE KPIS OPERATIVOS
     tot_asesores_eval = len(resumen_asesor)
     prom_op_le = resumen_asesor['Prom_LE_Mes'].mean() if tot_asesores_eval > 0 else 0.0
     prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean() if tot_asesores_eval > 0 else 0.0
@@ -4504,7 +4558,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 9. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI)
+    # 10. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI)
     st.markdown("<h3 class='header-section'>⚠️ Secciones de Alertas: Top 10 Asesores Más Bajos por Indicador</h3>", unsafe_allow_html=True)
 
     cols_export_alert = [
@@ -4553,7 +4607,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 10. TABLA CONSOLIDADA GENERAL
+    # 11. TABLA CONSOLIDADA GENERAL
     st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General por Asesor</h3>", unsafe_allow_html=True)
     st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
 
@@ -4565,7 +4619,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         hide_index=True
     )
 
-    # 11. MATRIZ VISUAL DE CUARTILES (PLOTLY)
+    # 12. MATRIZ VISUAL DE CUARTILES (PLOTLY)
     st.markdown("<h3 class='header-section'>📊 Matriz Visual: Cuartiles y Distribución de Desempeño</h3>", unsafe_allow_html=True)
 
     col_g1, col_g2 = st.columns(2)
