@@ -4256,9 +4256,9 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
                 return cols_lower[cl]
         return default_name
 
-    c_asesor = find_col(['Asesor', 'asesor', 'Nombre_Asesor', 'asesor_clean', 'Nom_Asesor'], 'Asesor')
-    c_sup = find_col(['Supervisor', 'supervisor', 'Nombre_Supervisor', 'Servidor_Clean'], 'Supervisor')
-    c_mes = find_col(['Año_Mes', 'ano_mes', 'Mes', 'mes_venta', 'fecha_vta_clean'], 'Año_Mes')
+    c_asesor = find_col(['Asesor', 'asesor', 'Nombre_Asesor', 'asesor_clean', 'Nom_Asesor', 'asesor_nombre'], 'Asesor')
+    c_sup = find_col(['Supervisor', 'supervisor', 'Nombre_Supervisor', 'Servidor_Clean', 'sup_nombre', 'BY', 'Servidor'], 'Supervisor')
+    c_mes = find_col(['Año_Mes', 'ano_mes', 'Mes', 'mes_venta', 'fecha_vta_clean', 'Año Mes'], 'Año_Mes')
     c_le = find_col(['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC'], 'LE')
     c_trm = find_col(['Tramites', 'tramites', 'TRM', 'Total_Tramites'], 'Tramites')
     c_llam = find_col(['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas'], 'Llamadas')
@@ -4268,9 +4268,16 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     c_hlog = find_col(['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'], 'Horas_Log')
     c_haus = find_col(['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'], 'Horas_Aus')
 
-    # Garantizar que las columnas necesarias existan en el DataFrame local
+    # Garantizar la existencia de columnas clave (evita KeyError si no existen en el dataset)
     df_m5 = df_base_m5.copy()
-    
+
+    if c_sup not in df_m5.columns:
+        df_m5[c_sup] = 'Sin Supervisor'
+    if c_asesor not in df_m5.columns:
+        df_m5[c_asesor] = 'Sin Asesor'
+    if c_mes not in df_m5.columns:
+        df_m5[c_mes] = 'Sin Mes'
+
     # Normalizar valores numéricos si la columna AT contiene letras ('A') en lugar de conteos
     if c_ap in df_m5.columns and df_m5[c_ap].dtype == 'object':
         df_m5['AP_Num'] = (df_m5[c_ap] == 'A').astype(int)
@@ -4287,7 +4294,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     
     col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
 
-    meses_disponibles = sorted(df_m5[c_mes].dropna().unique().tolist())
+    meses_disponibles = sorted(df_m5[c_mes].astype(str).dropna().unique().tolist())
     
     with col_f1:
         sel_meses_m5 = st.multiselect(
@@ -4298,7 +4305,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         )
 
     with col_f2:
-        supervisores_disponibles = sorted(df_m5[c_sup].dropna().unique().tolist())
+        supervisores_disponibles = sorted(df_m5[c_sup].astype(str).dropna().unique().tolist())
         sel_sup_m5 = st.multiselect(
             "👔 Filtrar por Supervisor:",
             options=supervisores_disponibles,
@@ -4315,30 +4322,27 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     # Filtrar datos según la selección de la cabecera
     df_filtered_m5 = df_m5[
-        (df_m5[c_mes].isin(sel_meses_m5)) & 
-        (df_m5[c_sup].isin(sel_sup_m5))
+        (df_m5[c_mes].astype(str).isin(sel_meses_m5)) & 
+        (df_m5[c_sup].astype(str).isin(sel_sup_m5))
     ].copy()
 
     if search_asesor.strip() != "":
-        df_filtered_m5 = df_filtered_m5[df_filtered_m5[c_asesor].str.contains(search_asesor, case=False, na=False)]
+        df_filtered_m5 = df_filtered_m5[df_filtered_m5[c_asesor].astype(str).str.contains(search_asesor, case=False, na=False)]
 
     if df_filtered_m5.empty:
         st.info("No se encontraron registros de asesores para el filtro aplicado.")
         st.stop()
 
     # 3. LÓGICA DE CÁLCULO DE MESES ACTIVOS Y PROMEDIOS PONDERADOS PER-ASESOR
-    # Identificar meses donde el asesor estuvo contratado/activo (LE > 0, Trámites > 0 u Horas Logueadas > 0)
     df_filtered_m5['Es_Mes_Activo'] = (
         (df_filtered_m5[c_le] > 0) | 
         (df_filtered_m5[c_trm] > 0) | 
         (df_filtered_m5[c_hlog] > 0)
     )
 
-    # Mapear meses activos reales por asesor
     df_activos = df_filtered_m5[df_filtered_m5['Es_Mes_Activo']]
     mapa_meses_activos = df_activos.groupby(c_asesor)[c_mes].nunique().to_dict()
 
-    # Agrupar datos consolidados por Asesor
     resumen_asesor = df_filtered_m5.groupby(c_asesor).agg({
         c_sup: 'last',
         c_le: 'sum',
@@ -4351,16 +4355,13 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         c_haus: 'sum'
     }).reset_index()
 
-    # Asignar meses activos con denominador mínimo de 1 (evita división por cero)
     resumen_asesor['Meses_Activos'] = resumen_asesor[c_asesor].map(mapa_meses_activos).fillna(0).astype(int)
     resumen_asesor['Meses_Activos_Denom'] = resumen_asesor['Meses_Activos'].clip(lower=1)
 
-    # Promedios mensuales ajustados (ÚNICAMENTE sobre meses activos del asesor)
     resumen_asesor['Prom_LE_Mes'] = (resumen_asesor[c_le] / resumen_asesor['Meses_Activos_Denom']).round(1)
     resumen_asesor['Prom_AP_Mes'] = (resumen_asesor[c_ap] / resumen_asesor['Meses_Activos_Denom']).round(1)
     resumen_asesor['Prom_Puntos_Mes'] = (resumen_asesor[c_pts] / resumen_asesor['Meses_Activos_Denom']).round(1)
 
-    # Ratios de gestión porcentuales
     resumen_asesor['Conv_Trm_Llam_%'] = np.where(
         resumen_asesor[c_llam] > 0, 
         (resumen_asesor[c_trm] / resumen_asesor[c_llam] * 100), 
@@ -4393,7 +4394,6 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     resumen_asesor['Cuartil_AP'] = asignar_cuartil(resumen_asesor['Prom_AP_Mes'])
     resumen_asesor['Cuartil_Puntos'] = asignar_cuartil(resumen_asesor['Prom_Puntos_Mes'])
 
-    # Reordenar y renombrar columnas principales
     resumen_asesor.rename(columns={
         c_asesor: 'Asesor',
         c_sup: 'Supervisor',
@@ -4478,14 +4478,12 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General por Asesor</h3>", unsafe_allow_html=True)
     st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
 
-    # Estilizado visual de celdas con colores para Cuartiles y Ausentismo
     def aplicar_estilos_m5(row):
         styles = [''] * len(row)
         q_le = str(row.get('Cuartil_LE', ''))
         q_ap = str(row.get('Cuartil_AP', ''))
         aus = float(row.get('%_Ausentismo', 0))
 
-        # Resaltar Q1 en verde claro y Q4 en rojo claro
         if 'Q1' in q_le or 'Q1' in q_ap:
             idx_le = row.index.get_loc('Prom_LE_Mes') if 'Prom_LE_Mes' in row.index else -1
             if idx_le >= 0:
@@ -4503,7 +4501,6 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
         return styles
 
-    # Orden predeterminado por Promedio LE Descendente
     resumen_display = resumen_asesor.sort_values(by='Prom_LE_Mes', ascending=False).reset_index(drop=True)
 
     st.dataframe(
