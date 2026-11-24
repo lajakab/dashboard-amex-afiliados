@@ -4231,12 +4231,25 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         unsafe_allow_html=True
     )
 
-    # 1. DETECCIÓN FLEXIBLE DE COLUMNAS DEL DATASET ORIGINAL
+    # 1. DETECCIÓN AUTOMÁTICA DEL DATAFRAME PRINCIPAL Y COLUMNAS
+    df_base_m5 = None
+    for posible_df in ['df', 'df_raw', 'df_afiliados', 'df_base', 'data', 'df_ventas']:
+        if posible_df in locals():
+            df_base_m5 = locals()[posible_df]
+            break
+        elif posible_df in globals():
+            df_base_m5 = globals()[posible_df]
+            break
+
+    if df_base_m5 is None or df_base_m5.empty:
+        st.error("⚠️ No se encontró la base de datos principal cargada en la memoria.")
+        st.stop()
+
     def find_col(candidates, default_name):
         for c in candidates:
-            if c in df.columns:
+            if c in df_base_m5.columns:
                 return c
-        cols_lower = {str(col).strip().lower(): col for col in df.columns}
+        cols_lower = {str(col).strip().lower(): col for col in df_base_m5.columns}
         for c in candidates:
             cl = str(c).strip().lower()
             if cl in cols_lower:
@@ -4249,14 +4262,14 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     c_le = find_col(['LE', 'Lead_Efectivo', 'leads_efectivos', 'Leads_Efectivos', 'Lead_Efectivo_ColC'], 'LE')
     c_trm = find_col(['Tramites', 'tramites', 'TRM', 'Total_Tramites'], 'Tramites')
     c_llam = find_col(['Llamadas', 'llamadas', 'LLAM', 'Total_Llamadas'], 'Llamadas')
-    c_ap = find_col(['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean'], 'AP')
+    c_ap = find_col(['AP', 'Aprobadas', 'aprobadas', 'Status_AT_Clean', 'Decisión'], 'AP')
     c_pts = find_col(['Puntos', 'puntos', 'Total_Puntos', 'puntos_gestion'], 'Puntos')
     c_hprog = find_col(['Horas_Prog', 'horas_programadas', 'Horas_Programadas', 'dias_programados'], 'Horas_Prog')
     c_hlog = find_col(['Horas_Log', 'horas_logueadas', 'Horas_Logueadas', 'dias_logueados'], 'Horas_Log')
     c_haus = find_col(['Horas_Aus', 'horas_ausentismo', 'Horas_Ausentismo', 'dias_ausentes'], 'Horas_Aus')
 
     # Garantizar que las columnas necesarias existan en el DataFrame local
-    df_m5 = df.copy()
+    df_m5 = df_base_m5.copy()
     
     # Normalizar valores numéricos si la columna AT contiene letras ('A') en lugar de conteos
     if c_ap in df_m5.columns and df_m5[c_ap].dtype == 'object':
@@ -4525,7 +4538,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     with col_g2:
         top_bottom_cmp = pd.concat([
-            resumen_display.head(5).assign(Tipo='Top 5 Mejoes'),
+            resumen_display.head(5).assign(Tipo='Top 5 Mejores'),
             resumen_display.tail(5).assign(Tipo='Top 5 Bajos')
         ])
         fig_bar = px.bar(
@@ -4535,7 +4548,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
             color='Tipo',
             text='Prom_LE_Mes',
             title="Comparativo Extremos: Top 5 Mejores vs. Top 5 Más Bajos (Prom LE/Mes)",
-            color_discrete_map={'Top 5 Mejoes': '#16a34a', 'Top 5 Bajos': '#dc2626'}
+            color_discrete_map={'Top 5 Mejores': '#16a34a', 'Top 5 Bajos': '#dc2626'}
         )
         fig_bar.update_traces(textposition='outside')
         st.plotly_chart(fig_bar, use_container_width=True)
