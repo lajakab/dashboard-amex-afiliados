@@ -4221,7 +4221,7 @@ elif opcion_hoja == "🧑‍💼 Módulo 4: Análisis Supervisor":
         fig.update_layout(height=350,title="Distribución de cumplimiento")
         st.plotly_chart(fig,use_container_width=True)
 # =====================================================================
-# MÓDULO 5: PROMEDIO GENERAL DEL ASESOR (CONSOLIDADO MULTI-MES)
+# MÓDULO 5: PROMEDIO GENERAL DEL ASESOR (CONSOLIDADO MULTI-MES & MATRIZ)
 # =====================================================================
 elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     import pandas as pd
@@ -4233,7 +4233,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     st.markdown(
         "<div class='sub-title'>Consolidado histórico por asesor con promedios ajustados según meses de actividad efectiva, "
         "desglose completo de conversión y efectividad (Evaluados, No Evaluados, Declinados, Cancelados), "
-        "Puntos Llave acumulados y matriz de cuartiles.</div>", 
+        "Puntos Llave acumulados estrictamente por aprobaciones y matriz de cuartiles operativos.</div>", 
         unsafe_allow_html=True
     )
 
@@ -4248,7 +4248,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
             break
 
     if df_vta_m5 is None or df_vta_m5.empty:
-        st.error("⚠️ No se encontró la base de ventas principal cargada en la memoria.")
+        st.error("⚠️ No se encontró la base de datos principal cargada en la memoria.")
         st.stop()
 
     # 2. FUNCIONES DE EXTRACCIÓN Y LIMPIEZA BLINDADAS
@@ -4307,10 +4307,9 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
             pass
         return (0, 0)
 
-    # 4. CRUCE DE SUPERVISORES E IDENTIFICACIÓN DE COLUMNAS SEGÚN LÓGICA DEL MÓDULO 2
+    # 4. CRUCE DE SUPERVISORES E IDENTIFICACIÓN DE COLUMNAS SEGÚN LÓGICA OPERATIVA
     df_dist_m5 = locals().get('df_distribucion', globals().get('df_distribucion', pd.DataFrame()))
 
-    # Intentar enriquecer Supervisor desde df_distribucion si existe id_per_clean
     if not df_dist_m5.empty and "id_per_clean" in df_dist_m5.columns and "id_per_clean" in df_vta_m5.columns:
         dist_sub = df_dist_m5.drop_duplicates(subset=["id_per_clean"]).copy()
         cols_map = ["id_per_clean"]
@@ -4323,7 +4322,6 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         if "agente_dist" in df_vta_m5.columns:
             df_vta_m5["agente"] = df_vta_m5["agente_dist"].fillna(df_vta_m5.get("agente", "Sin Asesor"))
 
-    # Identificación exacta de columnas
     c_fecha = find_col(df_vta_m5, ['fecha_vta', 'F_VTA', 'FECHA_VTA', 'Fecha_Vta', 'Fecha Vta', 'fecha'], ['fecha', 'f_vta'])
     c_asesor = find_col(df_vta_m5, ['agente', 'Nombre_Asesor', 'Asesor', 'asesor', 'ASESOR', 'Nombre Asesor', 'Nom_Asesor', 'Usuario', 'Vendedor'], ['agente', 'asesor', 'vendedor', 'usuario'])
     c_sup = find_col(df_vta_m5, ['Supervisor', 'supervisor', 'SUPERVISOR', 'Nombre_Supervisor', 'sup_clean', 'BY'], ['superv', 'lider', 'jefe', 'sup'])
@@ -4346,7 +4344,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     df_vta_m5['_Asesor_Clean'] = s_ase_raw.astype(str).str.strip()
     df_vta_m5['_Supervisor_Clean'] = s_sup_raw.astype(str).str.strip()
 
-    # 5. MATRIZ VECTORIZADA DE INDICADORES (STATUS_VTA = LEAD EFECTIVO & DECISIÓN)
+    # 5. MATRIZ VECTORIZADA DE INDICADORES & CÁLCULO DE PUNTOS
     s_status = get_clean_series(df_vta_m5, c_status, default_val="").astype(str).str.strip().str.upper()
     s_decision = get_clean_series(df_vta_m5, c_decision, default_val="").astype(str).str.strip().str.upper()
 
@@ -4363,13 +4361,14 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     df_vta_m5['Is_Eval'] = ((df_vta_m5['Is_LE'] == 1) & (s_decision.isin(['A', 'D', 'P', 'C']))).astype(int)
     df_vta_m5['Is_No_Eval'] = ((df_vta_m5['Is_LE'] == 1) & (~s_decision.isin(['A', 'D', 'P', 'C']))).astype(int)
 
-    # Puntos Llave (Columna BT)
-    if c_puntos_llave and c_puntos_llave in df_vta_m5.columns:
-        df_vta_m5['Puntos_Llave_Num'] = pd.to_numeric(df_vta_m5[c_puntos_llave], errors='coerce').fillna(0.0)
-    else:
-        df_vta_m5['Puntos_Llave_Num'] = df_vta_m5['Is_AP'].astype(float)
+    # -------------------------------------------------------------------------
+    # AJUSTE REQUERIDO: CÁLCULO DE PUNTOS SEGÚN CUADRO DE PRODUCTIVIDAD (MÓDULO 2 / 3)
+    # Solo suman puntos las Aprobadas (Is_AP == 1); si la celda es NaN toma 1.0 por defecto.
+    # -------------------------------------------------------------------------
+    s_pts_raw = pd.to_numeric(get_clean_series(df_vta_m5, c_puntos_llave, default_val="1"), errors='coerce').fillna(1.0)
+    df_vta_m5['Puntos_Llave_Num'] = np.where(df_vta_m5['Is_AP'] == 1, s_pts_raw, 0.0)
 
-    # 6. FILTROS RÁPIDOS EN PANTALLA
+    # 6. FILTROS EN PANTALLA (FILA 1)
     meses_disponibles = get_clean_unique_list(df_vta_m5['_Mes_Clean'], sort_key=get_sort_key)
     supervisores_disponibles = get_clean_unique_list(df_vta_m5['_Supervisor_Clean'])
 
@@ -4427,7 +4426,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
     resumen_asesor['Meses_Activos'] = resumen_asesor['_Asesor_Clean'].map(mapa_meses_activos).fillna(0).astype(int)
     resumen_asesor['Meses_Activos_Denom'] = resumen_asesor['Meses_Activos'].clip(lower=1)
 
-    # Promedios mensuales por Asesor (divididos por sus Meses Activos)
+    # Promedios mensuales por Asesor (divididos entre sus Meses Activos)
     resumen_asesor['Prom_LE_Mes'] = (resumen_asesor['Total_LE'] / resumen_asesor['Meses_Activos_Denom']).round(1)
     resumen_asesor['Prom_AP_Mes'] = (resumen_asesor['Total_AP'] / resumen_asesor['Meses_Activos_Denom']).round(1)
     resumen_asesor['Prom_Puntos_Mes'] = (resumen_asesor['Total_Puntos'] / resumen_asesor['Meses_Activos_Denom']).round(1)
@@ -4462,7 +4461,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         'Total_Puntos': 'Total Puntos Llave'
     }, inplace=True)
 
-    # 8. SEGUNDA FILA DE FILTROS: MESES ACTIVOS Y CUARTILES
+    # 8. SEGUNDA FILA DE FILTROS: MESES ACTIVOS Y CUARTILES (FILA 2)
     col_q1, col_q2, col_q3, col_q4 = st.columns(4)
 
     opciones_meses_activos = sorted(resumen_asesor['Meses_Activos'].unique().tolist())
@@ -4512,7 +4511,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
         st.info("No se encontraron asesores que cumplan con los criterios seleccionados.")
         st.stop()
 
-    # 9. TARJETAS SUPERIORES DE KPIS OPERATIVOS
+    # 9. TARJETAS SUPERIORES DE KPIS OPERATIVOS (4 TARJETAS)
     tot_asesores_eval = len(resumen_asesor)
     prom_op_le = resumen_asesor['Prom_LE_Mes'].mean() if tot_asesores_eval > 0 else 0.0
     prom_op_ap = resumen_asesor['Prom_AP_Mes'].mean() if tot_asesores_eval > 0 else 0.0
@@ -4530,7 +4529,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 10. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI)
+    # 10. SECCIONES DE ALERTAS DESPLEGABLES (TOP 10 MÁS BAJOS POR KPI EN 5 PESTAÑAS)
     st.markdown("<h3 class='header-section'>⚠️ Secciones de Alertas: Top 10 Asesores Más Bajos por Indicador</h3>", unsafe_allow_html=True)
 
     cols_export = [
@@ -4580,7 +4579,7 @@ elif "5." in opcion_hoja or "Promedio General" in opcion_hoja:
 
     st.divider()
 
-    # 11. TABLA CONSOLIDADA GENERAL
+    # 11. TABLA CONSOLIDADA GENERAL Y MATRIZ DE CONVERSIÓN
     st.markdown("<h3 class='header-section'>📋 Tabla Consolidada: Promedio General y Matriz de Conversión por Asesor</h3>", unsafe_allow_html=True)
     st.caption("Los promedios mensuales están divididos exactamente entre los meses activos de cada asesor en el periodo seleccionado.")
 
